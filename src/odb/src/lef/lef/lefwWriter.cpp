@@ -33,11 +33,13 @@
 
 #include "lefwWriter.hpp"
 
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
 
 #include "crypt.hpp"
+#include "lefiKRDefs.hpp"
 
 BEGIN_LEF_PARSER_NAMESPACE
 

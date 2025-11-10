@@ -12,6 +12,7 @@
 #include "db_sta/dbNetwork.hh"
 #include "db_sta/dbSta.hh"
 #include "dpl/Opendp.h"
+#include "est/EstimateParasitics.h"
 #include "odb/db.h"
 #include "odb/dbTypes.h"
 #include "odb/geom.h"
@@ -39,9 +40,12 @@
 #include "sta/UnorderedMap.hh"
 #include "utl/Logger.h"
 
+namespace est {
+class EstimateParasitics;
+}
+
 namespace rsz {
 
-using std::string;
 using std::vector;
 
 using odb::dbMaster;
@@ -138,6 +142,7 @@ class BaseMove : public sta::dbStaState
 
  protected:
   Resizer* resizer_;
+  est::EstimateParasitics* estimate_parasitics_;
   Logger* logger_;
   Network* network_;
   dbNetwork* db_network_;
@@ -213,7 +218,6 @@ class BaseMove : public sta::dbStaState
                                float delay_adjust,
                                SlackEstimatorParams params,
                                bool accept_if_slack_improves);
-  bool hasPort(const Net* net);
   void getBufferPins(Instance* buffer, Pin*& ip, Pin*& op);
   int fanout(Vertex* vertex);
 
@@ -224,12 +228,29 @@ class BaseMove : public sta::dbStaState
                           const DcalcAnalysisPt* dcalc_ap);
   bool replaceCell(Instance* inst, const LibertyCell* replacement);
 
+  bool checkMaxCapViolation(const Pin* output_pin,
+                            LibertyPort* output_port,
+                            float output_cap);
+  bool checkMaxSlewViolation(const Pin* output_pin,
+                             LibertyPort* output_port,
+                             float output_slew_factor,
+                             float output_cap,
+                             const DcalcAnalysisPt* dcalc_ap);
+  float computeElmoreSlewFactor(const Pin* output_pin,
+                                LibertyPort* output_port,
+                                float output_load_cap);
+  ArcDelay getWorstIntrinsicDelay(const LibertyPort* input_port);
+  Slack getWorstInputSlack(Instance* inst);
+  Slack getWorstOutputSlack(Instance* inst);
+  vector<const LibertyPort*> getOutputPorts(const LibertyCell* cell);
+  vector<const Pin*> getOutputPins(const Instance* inst);
+  LibertyCellSeq getSwappableCells(LibertyCell* base);
+
+  static constexpr int size_down_max_fanout_ = 10;
   static constexpr int rebuffer_max_fanout_ = 20;
   static constexpr int split_load_min_fanout_ = 8;
   static constexpr int buffer_removal_max_fanout_ = 10;
   static constexpr float rebuffer_relaxation_factor_ = 0.03;
-
-  vector<const Pin*> getFanouts(const Instance* inst);
 };
 
 }  // namespace rsz

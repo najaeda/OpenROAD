@@ -5,11 +5,16 @@ or_integration_tests(
     check_axioms
     clock_pin
     constant1
+    escape_slash
+    escape_slash_hier
     find_clks1
     find_clks2
+    get_ports1
+    get_ports1_hier
     hier2
     hierclock
     hierwrite
+    hier_deep
     make_port
     network_edit1
     power1
@@ -52,6 +57,8 @@ or_integration_tests(
     write_verilog6
     write_verilog7
     write_verilog8
+    write_verilog9
+    write_verilog9_hier
 )
 
 if(ENABLE_TESTS)

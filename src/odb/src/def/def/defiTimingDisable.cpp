@@ -29,10 +29,12 @@
 
 #include "defiTimingDisable.hpp"
 
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
 #include "defiDebug.hpp"
+#include "defiKRDefs.hpp"
 #include "defrData.hpp"
 
 BEGIN_DEF_PARSER_NAMESPACE

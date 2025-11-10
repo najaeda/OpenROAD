@@ -41,10 +41,12 @@ add_library(utl_lib
   src/Metrics.cpp
   src/CFileUtils.cpp
   src/ScopedTemporaryFile.cpp
+  src/SuppressStdout.cpp
   src/Logger.cpp
   src/Progress.cpp
   src/CommandLineProgress.cpp
   src/timer.cpp
+  src/mem_stats.cpp
   src/decode.cpp
   src/prometheus/metrics_server.cpp
   src/histogram.cpp

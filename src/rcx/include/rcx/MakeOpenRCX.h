@@ -3,28 +3,12 @@
 
 #pragma once
 
-#include <tcl.h>
-
-namespace odb {
-class dbDatabase;
-}
-
-namespace utl {
-class Logger;
-}
+#include "tcl.h"
 
 namespace rcx {
 
 class Ext;
 
-rcx::Ext* makeOpenRCX();
-
-void deleteOpenRCX(rcx::Ext* extractor);
-
-void initOpenRCX(rcx::Ext* extractor,
-                 odb::dbDatabase* db,
-                 utl::Logger* logger,
-                 const char* spef_version,
-                 Tcl_Interp* tcl_interp);
+void initOpenRCX(Tcl_Interp* tcl_interp);
 
 }  // namespace rcx

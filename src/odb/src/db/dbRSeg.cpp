@@ -4,17 +4,22 @@
 #include "dbRSeg.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <vector>
 
 #include "dbBlock.h"
 #include "dbCapNode.h"
 #include "dbCommon.h"
+#include "dbCore.h"
 #include "dbDatabase.h"
 #include "dbJournal.h"
 #include "dbNet.h"
 #include "dbTable.h"
 #include "dbTable.hpp"
+#include "odb/ZException.h"
 #include "odb/db.h"
+#include "odb/dbObject.h"
+#include "odb/dbSet.h"
 #include "odb/dbShape.h"
 #include "utl/Logger.h"
 

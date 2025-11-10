@@ -3,24 +3,47 @@
 
 #include "rcx/extSpef.h"
 
+#include <stdio.h>  // NOLINT(modernize-deprecated-headers): for popen()
+
 #include <algorithm>
+#include <cctype>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <ctime>
 #include <limits>
 #include <vector>
 
 #include "name.h"
+#include "odb/array1.h"
+#include "odb/db.h"
 #include "odb/dbExtControl.h"
+#include "odb/dbSet.h"
+#include "odb/dbTypes.h"
+#include "odb/geom.h"
 #include "parse.h"
 #include "rcx/extRCap.h"
 #include "utl/Logger.h"
 
-namespace rcx {
-
+using odb::Ath__array1D;
+using odb::dbBlock;
+using odb::dbCapNode;
+using odb::dbCCSeg;
+using odb::dbInst;
+using odb::dbNet;
+using odb::dbRSeg;
+using odb::dbSet;
+using odb::dbSigType;
+using odb::dbStringProperty;
+using odb::dbWire;
+using odb::Point;
 using utl::RCX;
-using namespace odb;
+
+namespace rcx {
 
 class extMain;
 
-extSpef::extSpef(dbTech* tech,
+extSpef::extSpef(odb::dbTech* tech,
                  dbBlock* blk,
                  Logger* logger,
                  const char* version,
@@ -277,7 +300,7 @@ void extSpef::writeNameNode(dbCapNode* node)
 
 void extSpef::writeITermNode(const uint node)
 {
-  dbITerm* iterm = dbITerm::getITerm(_block, node);
+  odb::dbITerm* iterm = odb::dbITerm::getITerm(_block, node);
   dbInst* inst = iterm->getInst();
   if (inst->getMaster()->isMarked()) {
     return;
@@ -318,7 +341,7 @@ void extSpef::writeITermNode(const uint node)
 
 void extSpef::writeITerm(const uint node)
 {
-  dbITerm* iterm = dbITerm::getITerm(_block, node);
+  odb::dbITerm* iterm = odb::dbITerm::getITerm(_block, node);
   if (iterm->getInst()->getMaster()->isMarked()) {
     return;
   }
@@ -354,7 +377,7 @@ void extSpef::writeITerm(const uint node)
 
 void extSpef::writeBTerm(const uint node)
 {
-  dbBTerm* bterm = dbBTerm::getBTerm(_block, node);
+  odb::dbBTerm* bterm = odb::dbBTerm::getBTerm(_block, node);
   if (_bufString) {
     sprintf(_msgBuf1, "%s ", addEscChar(bterm->getName().c_str(), false));
     strcat(_bufString, _msgBuf1);
@@ -419,7 +442,10 @@ void extSpef::writeCapNode(dbCapNode* capNode, uint netId)
 
 void extSpef::writeCapITerm(const uint node, const uint capIndex)
 {
-  if ((dbITerm::getITerm(_block, node))->getInst()->getMaster()->isMarked()) {
+  if ((odb::dbITerm::getITerm(_block, node))
+          ->getInst()
+          ->getMaster()
+          ->isMarked()) {
     return;
   }
   writeCNodeNumber();
@@ -452,7 +478,7 @@ void extSpef::writeCapPort(const uint node, const uint capIndex)
 
 void extSpef::writePort(const uint node)
 {
-  dbBTerm* bterm = dbBTerm::getBTerm(_block, node);
+  odb::dbBTerm* bterm = odb::dbBTerm::getBTerm(_block, node);
   fprintf(_outFP,
           "*P %s %c",
           addEscChar(bterm->getName().c_str(), false),
@@ -827,8 +853,9 @@ class compareCC
       const uint id1 = cp1->getNode();
       const uint id2 = cp2->getNode();
       if (cp1->isBTerm() && cp2->isBTerm()) {
-        const int rc = strcmp(dbBTerm::getBTerm(block, id1)->getName().c_str(),
-                              dbBTerm::getBTerm(block, id2)->getName().c_str());
+        const int rc
+            = strcmp(odb::dbBTerm::getBTerm(block, id1)->getName().c_str(),
+                     odb::dbBTerm::getBTerm(block, id2)->getName().c_str());
         if (rc != 0) {
           return (rc < 0 ? true : false);
         }
@@ -866,8 +893,9 @@ class compareCC
       const uint id1 = cp1->getNode();
       const uint id2 = cp2->getNode();
       if (cp1->isBTerm() && cp2->isBTerm()) {
-        const int rc = strcmp(dbBTerm::getBTerm(block, id1)->getName().c_str(),
-                              dbBTerm::getBTerm(block, id2)->getName().c_str());
+        const int rc
+            = strcmp(odb::dbBTerm::getBTerm(block, id1)->getName().c_str(),
+                     odb::dbBTerm::getBTerm(block, id2)->getName().c_str());
         if (rc != 0) {
           return (rc < 0 ? true : false);
         }
@@ -1246,12 +1274,12 @@ void extSpef::writeBlockPorts()
   if (_partial && !_btermFound) {
     return;
   }
-  dbSet<dbBTerm> bterms = _block->getBTerms();
+  dbSet<odb::dbBTerm> bterms = _block->getBTerms();
   if (!bterms.empty()) {
     writeKeyword("\n*PORTS");
   }
 
-  for (dbBTerm* bterm : bterms) {
+  for (odb::dbBTerm* bterm : bterms) {
     if (bterm->getSigType().isSupply()) {
       continue;
     }
@@ -1337,10 +1365,10 @@ void extSpef::writeNetMap(dbSet<dbNet>& nets)
       continue;
     }
     net->setMark_1(true);
-    for (dbITerm* iterm : net->getITerms()) {
+    for (odb::dbITerm* iterm : net->getITerms()) {
       iterm->getInst()->setUserFlag1();
     }
-    for (dbBTerm* bterm : net->getBTerms()) {
+    for (odb::dbBTerm* bterm : net->getBTerms()) {
       _btermFound = true;
       bterm->setMark(1);
     }
@@ -1601,7 +1629,7 @@ uint extSpef::getMappedBTermId(const uint spefId)
     return 0;
   }
   const char* name = _nameMapTable->geti(spefId);
-  dbBTerm* bterm = _block->findBTerm(name);
+  odb::dbBTerm* bterm = _block->findBTerm(name);
   return bterm->getId();
 }
 

@@ -3,9 +3,12 @@
 
 #include "gpl/MakeReplace.h"
 
-#include <tcl.h>
-
 #include "gpl/Replace.h"
+#include "graphicsImpl.h"
+#include "graphicsNone.h"
+#include "gui/gui.h"
+#include "tcl.h"
+#include "utl/Logger.h"
 #include "utl/decode.h"
 
 extern "C" {
@@ -16,27 +19,19 @@ namespace gpl {
 
 extern const char* gpl_tcl_inits[];
 
-gpl::Replace* makeReplace()
-{
-  return new gpl::Replace();
-}
-
-void initReplace(gpl::Replace* replace,
-                 odb::dbDatabase* db,
-                 sta::dbSta* sta,
-                 rsz::Resizer* resizer,
-                 grt::GlobalRouter* global_route,
-                 utl::Logger* logger,
-                 Tcl_Interp* tcl_interp)
+void initReplace(Tcl_Interp* tcl_interp)
 {
   Gpl_Init(tcl_interp);
   utl::evalTclInit(tcl_interp, gpl::gpl_tcl_inits);
-  replace->init(db, sta, resizer, global_route, logger);
 }
 
-void deleteReplace(gpl::Replace* replace)
+void initReplaceGraphics(Replace* replace, utl::Logger* log)
 {
-  delete replace;
+  if (gui::Gui::get() == nullptr) {
+    replace->setGraphicsInterface(gpl::GraphicsNone());
+  } else {
+    replace->setGraphicsInterface(gpl::GraphicsImpl(log));
+  }
 }
 
 }  // namespace gpl

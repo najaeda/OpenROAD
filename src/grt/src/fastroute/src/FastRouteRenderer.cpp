@@ -3,7 +3,12 @@
 
 #include "FastRouteRenderer.h"
 
+#include <cmath>
 #include <vector>
+
+#include "gui/gui.h"
+#include "odb/db.h"
+#include "stt/SteinerTreeBuilder.h"
 
 namespace grt {
 

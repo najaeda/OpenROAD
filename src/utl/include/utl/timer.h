@@ -35,6 +35,13 @@ class DebugScopedTimer : public Timer
                    const char* group,
                    int level,
                    const std::string& msg);
+  DebugScopedTimer(double& aggregate,
+                   utl::Logger* logger,
+                   ToolId tool,
+                   const char* group,
+                   int level,
+                   const std::string& msg);
+  DebugScopedTimer(double& aggregate);
   ~DebugScopedTimer() override;
 
  private:
@@ -43,6 +50,7 @@ class DebugScopedTimer : public Timer
   ToolId tool_;
   const char* group_;
   int level_;
+  double* aggregate_ = nullptr;
 };
 
 std::ostream& operator<<(std::ostream& os, const Timer& t);

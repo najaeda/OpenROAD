@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "odb.h"
+#include "odb/odb.h"
 
 namespace utl {
 class Logger;
@@ -61,6 +61,13 @@ enum dbObjectType
   dbBusPortObj,
   dbCellEdgeSpacingObj,
   dbChipObj,
+  dbChipBumpObj,
+  dbChipBumpInstObj,
+  dbChipConnObj,
+  dbChipInstObj,
+  dbChipNetObj,
+  dbChipRegionObj,
+  dbChipRegionInstObj,
   dbDatabaseObj,
   dbDftObj,
   dbGCellGridObj,

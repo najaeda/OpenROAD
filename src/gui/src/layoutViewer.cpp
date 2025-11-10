@@ -4,6 +4,7 @@
 #include "layoutViewer.h"
 
 #include <QApplication>
+#include <QColor>
 #include <QDateTime>
 #include <QFileDialog>
 #include <QFont>
@@ -12,6 +13,7 @@
 #include <QImageWriter>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMenu>
 #include <QPaintEvent>
 #include <QPainter>
 #include <QPainterPath>
@@ -19,18 +21,26 @@
 #include <QScrollBar>
 #include <QSizePolicy>
 #include <QStaticText>
+#include <QString>
 #include <QToolButton>
 #include <QToolTip>
 #include <QTranslator>
-#include <boost/geometry.hpp>
+#include <QWidget>
+#include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstdint>
 #include <deque>
 #include <functional>
 #include <limits>
+#include <map>
+#include <memory>
+#include <set>
 #include <tuple>
 #include <utility>
 #include <vector>
 
+#include "boost/geometry/geometry.hpp"
 #include "dbDescriptors.h"
 #include "gui/gui.h"
 #include "gui_utils.h"
@@ -38,8 +48,11 @@
 #include "label.h"
 #include "mainWindow.h"
 #include "odb/db.h"
+#include "odb/dbObject.h"
 #include "odb/dbShape.h"
 #include "odb/dbTransform.h"
+#include "odb/dbTypes.h"
+#include "odb/geom.h"
 #include "painter.h"
 #include "ruler.h"
 #include "scriptWidget.h"
@@ -99,7 +112,7 @@ LayoutViewer::LayoutViewer(
     const std::function<bool()>& show_db_view,
     QWidget* parent)
     : QWidget(parent),
-      block_(nullptr),
+      chip_(nullptr),
       options_(options),
       output_widget_(output_widget),
       selected_(selected),
@@ -147,7 +160,7 @@ LayoutViewer::LayoutViewer(
 
   connect(&search_, &Search::modified, this, &LayoutViewer::fullRepaint);
 
-  connect(&search_, &Search::newBlock, this, &LayoutViewer::setBlock);
+  connect(&search_, &Search::newChip, this, &LayoutViewer::setChip);
 }
 
 void LayoutViewer::handleLoadingIndication()
@@ -166,11 +179,11 @@ void LayoutViewer::setLoadingState()
   loading_timer_->start();
 }
 
-void LayoutViewer::setBlock(odb::dbBlock* block)
+void LayoutViewer::setChip(odb::dbChip* chip)
 {
-  block_ = block;
+  chip_ = chip;
 
-  if (block && cut_maximum_size_.empty()) {
+  if (getBlock() && cut_maximum_size_.empty()) {
     generateCutLayerMaximumSizes();
   }
 
@@ -214,11 +227,11 @@ odb::Point LayoutViewer::findNextRulerPoint(const odb::Point& mouse)
 
 Rect LayoutViewer::getBounds() const
 {
-  Rect bbox = block_->getBBox()->getBox();
-
-  Rect die = block_->getDieArea();
-
-  bbox.merge(die);
+  Rect bbox{0, 0, chip_->getWidth(), chip_->getHeight()};
+  if (dbBlock* block = getBlock()) {
+    bbox.merge(block->getBBox()->getBox());
+    bbox.merge(block->getDieArea());
+  }
 
   return bbox;
 }
@@ -455,7 +468,7 @@ void LayoutViewer::searchNearestViaEdge(
     const int shape_limit,
     const std::function<void(const Rect& rect)>& check_rect)
 {
-  auto via_shapes = search_.searchSNetViaShapes(block_,
+  auto via_shapes = search_.searchSNetViaShapes(getBlock(),
                                                 cut_layer,
                                                 search_line.xMin(),
                                                 search_line.yMin(),
@@ -482,7 +495,7 @@ std::pair<LayoutViewer::Edge, bool> LayoutViewer::searchNearestEdge(
     return {Edge(), false};
   }
 
-  const int search_radius = block_->getDbUnitsPerMicron();
+  const int search_radius = getDbuPerMicron();
 
   Edge closest_edge;
   int edge_distance = std::numeric_limits<int>::max();
@@ -541,11 +554,11 @@ std::pair<LayoutViewer::Edge, bool> LayoutViewer::searchNearestEdge(
         };
 
   // get die bounding box
-  Rect bbox = block_->getDieArea();
+  Rect bbox = getBlock()->getDieArea();
   check_rect(bbox);
 
   if (options_->areRegionsVisible()) {
-    for (auto* region : block_->getRegions()) {
+    for (auto* region : getBlock()->getRegions()) {
       for (auto* box : region->getBoundaries()) {
         odb::Rect region_box = box->getBox();
         if (region_box.area() > 0) {
@@ -569,7 +582,7 @@ std::pair<LayoutViewer::Edge, bool> LayoutViewer::searchNearestEdge(
                             pt.y() + search_radius);
   }
 
-  auto inst_range = search_.searchInsts(block_,
+  auto inst_range = search_.searchInsts(getBlock(),
                                         search_line.xMin(),
                                         search_line.yMin(),
                                         search_line.xMax(),
@@ -595,7 +608,7 @@ std::pair<LayoutViewer::Edge, bool> LayoutViewer::searchNearestEdge(
   const int shape_limit = shapeSizeLimit();
 
   // look for edges in metal shapes
-  dbTech* tech = block_->getTech();
+  dbTech* tech = getBlock()->getTech();
   for (auto layer : tech->getLayers()) {
     if (!options_->isVisible(layer)) {
       continue;
@@ -634,19 +647,23 @@ std::pair<LayoutViewer::Edge, bool> LayoutViewer::searchNearestEdge(
 
     const bool routing_visible = options_->areRoutingSegmentsVisible();
     const bool vias_visible = options_->areRoutingViasVisible();
-    if (routing_visible || vias_visible) {
-      auto box_shapes = search_.searchBoxShapes(block_,
+    const bool io_pins_visible = options_->areIOPinsVisible();
+    if (routing_visible || vias_visible || io_pins_visible) {
+      auto box_shapes = search_.searchBoxShapes(getBlock(),
                                                 layer,
                                                 search_line.xMin(),
                                                 search_line.yMin(),
                                                 search_line.xMax(),
                                                 search_line.yMax(),
                                                 shape_limit);
-      for (const auto& [box, is_via, net] : box_shapes) {
-        if (!routing_visible && !is_via) {
+      for (const auto& [box, type, net] : box_shapes) {
+        if (!routing_visible && type == Search::WIRE) {
           continue;
         }
-        if (!vias_visible && is_via) {
+        if (!vias_visible && type == Search::VIA) {
+          continue;
+        }
+        if (!io_pins_visible && type == Search::BTERM) {
           continue;
         }
         if (isNetVisible(net)) {
@@ -672,7 +689,7 @@ std::pair<LayoutViewer::Edge, bool> LayoutViewer::searchNearestEdge(
     }
 
     if (options_->areSpecialRoutingSegmentsVisible()) {
-      auto polygon_shapes = search_.searchSNetShapes(block_,
+      auto polygon_shapes = search_.searchSNetShapes(getBlock(),
                                                      layer,
                                                      search_line.xMin(),
                                                      search_line.yMin(),
@@ -687,7 +704,7 @@ std::pair<LayoutViewer::Edge, bool> LayoutViewer::searchNearestEdge(
     }
 
     if (options_->areFillsVisible()) {
-      auto fills = search_.searchFills(block_,
+      auto fills = search_.searchFills(getBlock(),
                                        layer,
                                        search_line.xMin(),
                                        search_line.yMin(),
@@ -702,7 +719,7 @@ std::pair<LayoutViewer::Edge, bool> LayoutViewer::searchNearestEdge(
     }
 
     if (options_->areObstructionsVisible()) {
-      auto obs = search_.searchObstructions(block_,
+      auto obs = search_.searchObstructions(getBlock(),
                                             layer,
                                             search_line.xMin(),
                                             search_line.yMin(),
@@ -716,7 +733,7 @@ std::pair<LayoutViewer::Edge, bool> LayoutViewer::searchNearestEdge(
   }
 
   if (options_->areBlockagesVisible()) {
-    auto blcks = search_.searchBlockages(block_,
+    auto blcks = search_.searchBlockages(getBlock(),
                                          search_line.xMin(),
                                          search_line.yMin(),
                                          search_line.xMax(),
@@ -729,7 +746,7 @@ std::pair<LayoutViewer::Edge, bool> LayoutViewer::searchNearestEdge(
 
   if (options_->areSitesVisible()) {
     for (const auto& [row, row_site, index] :
-         getRowRects(block_, search_line)) {
+         getRowRects(getBlock(), search_line)) {
       odb::dbSite* site = nullptr;
       if (row->getObjectType() == odb::dbObjectType::dbSiteObj) {
         site = static_cast<odb::dbSite*>(row);
@@ -776,7 +793,7 @@ void LayoutViewer::selectViaShapesAt(dbTechLayer* cut_layer,
                                      const int shape_limit,
                                      std::vector<Selected>& selections)
 {
-  auto via_shapes = search_.searchSNetViaShapes(block_,
+  auto via_shapes = search_.searchSNetViaShapes(getBlock(),
                                                 cut_layer,
                                                 region.xMin(),
                                                 region.yMin(),
@@ -805,12 +822,15 @@ void LayoutViewer::selectAt(odb::Rect region, std::vector<Selected>& selections)
 
   // Look for the selected object in reverse layer order
   auto& renderers = Gui::get()->renderers();
-  dbTech* tech = block_->getTech();
+  dbTech* tech = getChip()->getTech();
 
   const int shape_limit = shapeSizeLimit();
 
-  if (options_->areBlockagesVisible() && options_->areBlockagesSelectable()) {
-    auto blockages = search_.searchBlockages(block_,
+  odb::dbBlock* block = getBlock();
+
+  if (block && options_->areBlockagesVisible()
+      && options_->areBlockagesSelectable()) {
+    auto blockages = search_.searchBlockages(block,
                                              region.xMin(),
                                              region.yMin(),
                                              region.xMax(),
@@ -823,8 +843,10 @@ void LayoutViewer::selectAt(odb::Rect region, std::vector<Selected>& selections)
 
   // dbSet doesn't provide a reverse iterator so we have to copy it.
   std::deque<dbTechLayer*> rev_layers;
-  for (auto layer : tech->getLayers()) {
-    rev_layers.push_front(layer);
+  if (tech) {
+    for (auto layer : tech->getLayers()) {
+      rev_layers.push_front(layer);
+    }
   }
 
   for (auto layer : rev_layers) {
@@ -839,9 +861,13 @@ void LayoutViewer::selectAt(odb::Rect region, std::vector<Selected>& selections)
       }
     }
 
+    if (!block) {
+      continue;
+    }
+
     if (options_->areObstructionsVisible()
         && options_->areObstructionsSelectable()) {
-      auto obs = search_.searchObstructions(block_,
+      auto obs = search_.searchObstructions(block,
                                             layer,
                                             region.xMin(),
                                             region.yMin(),
@@ -855,8 +881,9 @@ void LayoutViewer::selectAt(odb::Rect region, std::vector<Selected>& selections)
 
     const bool routing_visible = options_->areRoutingSegmentsVisible();
     const bool vias_visible = options_->areRoutingViasVisible();
-    if (routing_visible || vias_visible) {
-      auto box_shapes = search_.searchBoxShapes(block_,
+    const bool io_pins_visible = options_->areIOPinsVisible();
+    if (routing_visible || vias_visible || io_pins_visible) {
+      auto box_shapes = search_.searchBoxShapes(block,
                                                 layer,
                                                 region.xMin(),
                                                 region.yMin(),
@@ -864,11 +891,14 @@ void LayoutViewer::selectAt(odb::Rect region, std::vector<Selected>& selections)
                                                 region.yMax(),
                                                 shape_limit);
 
-      for (auto& [box, is_via, net] : box_shapes) {
-        if (!routing_visible && !is_via) {
+      for (auto& [box, type, net] : box_shapes) {
+        if (!routing_visible && type == Search::WIRE) {
           continue;
         }
-        if (!vias_visible && is_via) {
+        if (!vias_visible && type == Search::VIA) {
+          continue;
+        }
+        if (!io_pins_visible && type == Search::BTERM) {
           continue;
         }
         if (isNetVisible(net) && options_->isNetSelectable(net)) {
@@ -891,7 +921,7 @@ void LayoutViewer::selectAt(odb::Rect region, std::vector<Selected>& selections)
     }
 
     if (options_->areSpecialRoutingSegmentsVisible()) {
-      auto polygon_shapes = search_.searchSNetShapes(block_,
+      auto polygon_shapes = search_.searchSNetShapes(block,
                                                      layer,
                                                      region.xMin(),
                                                      region.yMin(),
@@ -914,35 +944,37 @@ void LayoutViewer::selectAt(odb::Rect region, std::vector<Selected>& selections)
     }
   }
 
-  // Look for instances and ITerms
-  auto insts = search_.searchInsts(block_,
-                                   region.xMin(),
-                                   region.yMin(),
-                                   region.xMax(),
-                                   region.yMax(),
-                                   instanceSizeLimit());
+  if (block) {
+    // Look for instances and ITerms
+    auto insts = search_.searchInsts(block,
+                                     region.xMin(),
+                                     region.yMin(),
+                                     region.xMax(),
+                                     region.yMax(),
+                                     instanceSizeLimit());
 
-  for (auto* inst : insts) {
-    if (options_->isInstanceVisible(inst)) {
-      if (options_->isInstanceSelectable(inst)) {
-        selections.push_back(gui_->makeSelected(inst));
-      }
-      if (options_->areInstancePinsVisible()
-          && options_->areInstancePinsSelectable()) {
-        const odb::dbTransform xform = inst->getTransform();
-        for (const auto& [layer, boxes] : cell_boxes_[inst->getMaster()]) {
-          if (options_->isVisible(layer) && options_->isSelectable(layer)) {
-            for (const auto& [mterm, geoms] : boxes.mterms) {
-              odb::dbITerm* iterm = inst->getITerm(mterm);
-              for (const auto& geom : geoms) {
-                std::vector<odb::Point> points(geom.size());
-                for (const auto& pt : geom) {
-                  points.emplace_back(pt.x(), pt.y());
-                }
-                odb::Polygon poly(points);
-                xform.apply(poly);
-                if (boost::geometry::intersects(poly, region)) {
-                  selections.push_back(gui_->makeSelected(iterm));
+    for (auto* inst : insts) {
+      if (options_->isInstanceVisible(inst)) {
+        if (options_->isInstanceSelectable(inst)) {
+          selections.push_back(gui_->makeSelected(inst));
+        }
+        if (options_->areInstancePinsVisible()
+            && options_->areInstancePinsSelectable()) {
+          const odb::dbTransform xform = inst->getTransform();
+          for (const auto& [layer, boxes] : cell_boxes_[inst->getMaster()]) {
+            if (options_->isVisible(layer) && options_->isSelectable(layer)) {
+              for (const auto& [mterm, geoms] : boxes.mterms) {
+                odb::dbITerm* iterm = inst->getITerm(mterm);
+                for (const auto& geom : geoms) {
+                  std::vector<odb::Point> points(geom.size());
+                  for (const auto& pt : geom) {
+                    points.emplace_back(pt.x(), pt.y());
+                  }
+                  odb::Polygon poly(points);
+                  xform.apply(poly);
+                  if (boost::geometry::intersects(poly, region)) {
+                    selections.push_back(gui_->makeSelected(iterm));
+                  }
                 }
               }
             }
@@ -972,8 +1004,9 @@ void LayoutViewer::selectAt(odb::Rect region, std::vector<Selected>& selections)
     }
   }
 
-  if (options_->areRegionsVisible() && options_->areRegionsSelectable()) {
-    for (auto db_region : block_->getRegions()) {
+  if (block && options_->areRegionsVisible()
+      && options_->areRegionsSelectable()) {
+    for (auto db_region : block->getRegions()) {
       for (auto box : db_region->getBoundaries()) {
         if (box->getBox().intersects(region)) {
           selections.push_back(gui_->makeSelected(db_region));
@@ -982,8 +1015,8 @@ void LayoutViewer::selectAt(odb::Rect region, std::vector<Selected>& selections)
     }
   }
 
-  if (options_->areSitesVisible() && options_->areSitesSelectable()) {
-    for (const auto& [row_obj, rect, index] : getRowRects(block_, region)) {
+  if (block && options_->areSitesVisible() && options_->areSitesSelectable()) {
+    for (const auto& [row_obj, rect, index] : getRowRects(block, region)) {
       odb::dbSite* site = nullptr;
       if (row_obj->getObjectType() == odb::dbObjectType::dbSiteObj) {
         site = static_cast<odb::dbSite*>(row_obj);
@@ -1611,8 +1644,7 @@ void LayoutViewer::drawScaleBar(QPainter* painter, const QRect& rect)
     return;
   }
 
-  const qreal pixels_per_mircon
-      = pixels_per_dbu_ * block_->getDbUnitsPerMicron();
+  const qreal pixels_per_mircon = pixels_per_dbu_ * getDbuPerMicron();
   const qreal window_width = rect.width() / pixels_per_mircon;
   const qreal target_width = 0.1 * window_width;
 
@@ -1632,7 +1664,7 @@ void LayoutViewer::drawScaleBar(QPainter* painter, const QRect& rect)
   double scale_unit;
   QString unit_text;
   if (using_dbu_()) {
-    scale_unit = block_->getDbUnitsPerMicron();
+    scale_unit = getDbuPerMicron();
     unit_text = "";
   } else {
     if (bar_size > 1000) {
@@ -1782,6 +1814,11 @@ QRect LayoutViewer::computeIndicatorBackground(QPainter* painter,
   return background;
 }
 
+int LayoutViewer::getDbuPerMicron() const
+{
+  return getChip()->getDb()->getDbuPerMicron();
+}
+
 void LayoutViewer::paintEvent(QPaintEvent* event)
 {
   if (!hasDesign()) {
@@ -1807,7 +1844,7 @@ void LayoutViewer::paintEvent(QPaintEvent* event)
                          options_,
                          screenToDBU(draw_bounds),
                          pixels_per_dbu_,
-                         block_->getDbUnitsPerMicron());
+                         getDbuPerMicron());
 
   // update label outlines
   for (const auto& label : labels_) {
@@ -1995,9 +2032,9 @@ void LayoutViewer::showLayoutCustomMenu(QPoint pos)
   layout_context_menu_->popup(this->mapToGlobal(pos));
 }
 
-void LayoutViewer::blockLoaded(dbBlock* block)
+void LayoutViewer::chipLoaded(odb::dbChip* chip)
 {
-  search_.setTopBlock(block);
+  search_.setTopChip(chip);
 }
 
 void LayoutViewer::setScroller(LayoutScroll* scroller)
@@ -2319,8 +2356,8 @@ void LayoutViewer::restoreTclCommands(std::vector<std::string>& cmds)
 {
   cmds.push_back(fmt::format("gui::set_resolution {}", 1.0 / pixels_per_dbu_));
 
-  if (block_ != nullptr) {
-    const double dbu_per_micron = block_->getDbUnitsPerMicron();
+  if (getBlock() != nullptr) {
+    const double dbu_per_micron = getDbuPerMicron();
 
     cmds.push_back(fmt::format("gui::center_at {} {}",
                                center_.x() / dbu_per_micron,
@@ -2330,7 +2367,7 @@ void LayoutViewer::restoreTclCommands(std::vector<std::string>& cmds)
 
 bool LayoutViewer::hasDesign() const
 {
-  if (block_ == nullptr) {
+  if (chip_ == nullptr) {
     return false;
   }
 
@@ -2358,7 +2395,7 @@ void LayoutViewer::generateCutLayerMaximumSizes()
     return;
   }
 
-  dbTech* tech = block_->getTech();
+  dbTech* tech = getBlock()->getTech();
   if (tech == nullptr) {
     return;
   }
@@ -2383,7 +2420,7 @@ void LayoutViewer::generateCutLayerMaximumSizes()
         // This can happen for contacts in stdcell pins which are still
         // important for diff layer cut spacing checks.
         std::vector<dbMaster*> masters;
-        block_->getMasters(masters);
+        getBlock()->getMasters(masters);
         for (dbMaster* master : masters) {
           for (dbMTerm* term : master->getMTerms()) {
             for (dbMPin* pin : term->getMPins()) {

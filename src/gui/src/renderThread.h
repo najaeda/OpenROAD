@@ -3,16 +3,21 @@
 
 #pragma once
 
+#include <QColor>
 #include <QMutex>
 #include <QPainter>
+#include <QString>
 #include <QThread>
 #include <QWaitCondition>
+#include <map>
 #include <mutex>
+#include <utility>
 #include <vector>
 
 #include "gui/gui.h"
 #include "label.h"
 #include "odb/db.h"
+#include "odb/geom.h"
 #include "ruler.h"
 #include "utl/Logger.h"
 
@@ -59,10 +64,14 @@ class RenderThread : public QThread
 
   void setupIOPins(odb::dbBlock* block, const odb::Rect& bounds);
 
-  void drawBlock(QPainter* painter,
-                 odb::dbBlock* block,
+  void drawChips(QPainter* painter,
+                 odb::dbChip* chip,
                  const odb::Rect& bounds,
                  int depth);
+  void drawChip(QPainter* painter,
+                odb::dbChip* chip,
+                const odb::Rect& bounds,
+                int depth);
   void drawLayer(QPainter* painter,
                  odb::dbBlock* block,
                  odb::dbTechLayer* layer,

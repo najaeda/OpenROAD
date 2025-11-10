@@ -3,21 +3,24 @@
 
 #pragma once
 
-#include <tcl.h>
-
 #include <QCompleter>
 #include <QMenu>
 #include <QPlainTextEdit>
 #include <QRegularExpression>
 #include <QSettings>
+#include <QString>
 #include <QStringList>
 #include <QStringListModel>
+#include <QWidget>
+#include <functional>
+#include <map>
 #include <memory>
 #include <set>
 #include <string>
 #include <vector>
 
 #include "cmdInputWidget.h"
+#include "tcl.h"
 #include "tclCmdHighlighter.h"
 
 #if (TCL_MAJOR_VERSION == 8) && (TCL_MINOR_VERSION < 7) && !defined(Tcl_Size)
@@ -67,7 +70,7 @@ class TclCmdInputWidget : public CmdInputWidget
 
  private:
   void init();
-  void processTclResult(bool is_ok);
+  void processTclResult(int tcl_result);
 
   static int tclExitHandler(ClientData instance_data,
                             Tcl_Interp* interp,

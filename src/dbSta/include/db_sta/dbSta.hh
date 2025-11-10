@@ -124,6 +124,7 @@ class BufferUseAnalyser
 class dbSta : public Sta, public odb::dbDatabaseObserver
 {
  public:
+  dbSta(Tcl_Interp* tcl_interp, odb::dbDatabase* db, utl::Logger* logger);
   ~dbSta() override;
 
   enum InstType
@@ -185,6 +186,7 @@ class dbSta : public Sta, public odb::dbDatabaseObserver
   void postReadLef(odb::dbTech* tech, odb::dbLib* library) override;
   void postReadDef(odb::dbBlock* block) override;
   void postReadDb(odb::dbDatabase* db) override;
+  void postRead3Dbx(odb::dbChip* chip) override;
 
   // Find clock nets connected by combinational gates from the clock roots.
   std::set<dbNet*> findClkNets();
@@ -206,6 +208,13 @@ class dbSta : public Sta, public odb::dbDatabaseObserver
                        bool verbose,
                        const char* file_name,
                        const char* stage_name);
+  void countInstancesByType(odb::dbModule* module,
+                            InstTypeMap& inst_type_stats,
+                            std::vector<dbInst*>& insts);
+  void countPhysicalOnlyInstancesByType(InstTypeMap& inst_type_stats,
+                                        std::vector<dbInst*>& insts);
+  void addInstanceByTypeInstance(odb::dbInst* inst,
+                                 InstTypeMap& inst_type_stats);
 
   void reportTimingHistogram(int num_bins, const MinMax* min_max) const;
 
@@ -227,14 +236,6 @@ class dbSta : public Sta, public odb::dbDatabaseObserver
   void replaceCell(Instance* inst,
                    Cell* to_cell,
                    LibertyCell* to_lib_cell) override;
-
-  void countInstancesByType(odb::dbModule* module,
-                            InstTypeMap& inst_type_stats,
-                            std::vector<dbInst*>& insts);
-  void countPhysicalOnlyInstancesByType(InstTypeMap& inst_type_stats,
-                                        std::vector<dbInst*>& insts);
-  void addInstanceByTypeInstance(odb::dbInst* inst,
-                                 InstTypeMap& inst_type_stats);
 
   dbDatabase* db_ = nullptr;
   Logger* logger_ = nullptr;

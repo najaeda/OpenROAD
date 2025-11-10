@@ -8,8 +8,8 @@
 #include <optional>
 #include <string>
 
+#include "odb/db.h"
 #include "odb/dbBlockCallBackObj.h"
-#include "odb/dbCompare.h"
 
 namespace odb {
 class dbDatabase;
@@ -25,8 +25,8 @@ class Corner;
 namespace utl {
 class Logger;
 }
-namespace rsz {
-class Resizer;
+namespace est {
+class EstimateParasitics;
 }
 namespace dpl {
 class Opendp;
@@ -42,8 +42,6 @@ enum class GeneratedSourceType
   kStraps,
   kBumps
 };
-
-using odb::dbMaster;
 
 class PDNSim : public odb::dbBlockCallBackObj
 {
@@ -63,14 +61,12 @@ class PDNSim : public odb::dbBlockCallBackObj
   using IRDropByPoint = std::map<odb::Point, double>;
   using IRDropByLayer = std::map<odb::dbTechLayer*, IRDropByPoint>;
 
-  PDNSim();
+  PDNSim(utl::Logger* logger,
+         odb::dbDatabase* db,
+         sta::dbSta* sta,
+         est::EstimateParasitics* estimate_parasitics,
+         dpl::Opendp* opendp);
   ~PDNSim() override;
-
-  void init(utl::Logger* logger,
-            odb::dbDatabase* db,
-            sta::dbSta* sta,
-            rsz::Resizer* resizer,
-            dpl::Opendp* opendp);
 
   void setNetVoltage(odb::dbNet* net, sta::Corner* corner, double voltage);
   void setInstPower(odb::dbInst* inst, sta::Corner* corner, float power);
@@ -117,7 +113,7 @@ class PDNSim : public odb::dbBlockCallBackObj
                          IRDropByPoint& ir_drop) const;
 
   // Functions of decap cells
-  void addDecapMaster(dbMaster* decap_master, double decap_cap);
+  void addDecapMaster(odb::dbMaster* decap_master, double decap_cap);
   void insertDecapCells(double target, const char* net_name);
 
  private:
@@ -129,7 +125,7 @@ class PDNSim : public odb::dbBlockCallBackObj
 
   odb::dbDatabase* db_ = nullptr;
   sta::dbSta* sta_ = nullptr;
-  rsz::Resizer* resizer_ = nullptr;
+  est::EstimateParasitics* estimate_parasitics_ = nullptr;
   dpl::Opendp* opendp_ = nullptr;
   utl::Logger* logger_ = nullptr;
 

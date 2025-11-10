@@ -29,10 +29,12 @@
 
 #include "lefiNonDefault.hpp"
 
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
 #include "lefiDebug.hpp"
+#include "lefiKRDefs.hpp"
 #include "lefrCallBacks.hpp"
 #include "lefrData.hpp"
 #include "lex.h"

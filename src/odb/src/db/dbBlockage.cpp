@@ -3,8 +3,11 @@
 
 #include "dbBlockage.h"
 
+#include <cstring>
+
 #include "dbBlock.h"
 #include "dbBox.h"
+#include "dbCore.h"
 #include "dbDatabase.h"
 #include "dbInst.h"
 #include "dbTable.h"
@@ -12,6 +15,8 @@
 #include "odb/db.h"
 #include "odb/dbBlockCallBackObj.h"
 #include "odb/dbSet.h"
+#include "odb/dbTypes.h"
+#include "utl/Logger.h"
 
 namespace odb {
 

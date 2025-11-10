@@ -30,6 +30,8 @@
 // This program is the diffDef core program.  It has all the callback
 // routines and write it out to a temporary file.
 
+#include <string.h>
+
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
@@ -37,6 +39,10 @@
 #ifndef WIN32
 #include <unistd.h>
 #endif /* not WIN32 */
+#include "defiComponent.hpp"
+#include "defiDefs.hpp"
+#include "defiNet.hpp"
+#include "defiPath.hpp"
 #include "defrReader.hpp"
 
 char defaultName[64];

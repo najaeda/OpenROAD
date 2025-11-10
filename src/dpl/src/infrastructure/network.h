@@ -11,6 +11,8 @@
 #include "Coordinates.h"
 #include "Objects.h"
 #include "architecture.h"
+#include "dpl/Opendp.h"
+#include "odb/db.h"
 #include "odb/dbTypes.h"
 #include "odb/geom.h"
 namespace odb {
@@ -25,7 +27,6 @@ class Pin;
 class Grid;
 class Edge;
 class PlacementDRC;
-using odb::dbOrientType;
 
 class Network
 {

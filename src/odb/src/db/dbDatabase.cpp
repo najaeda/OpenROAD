@@ -5,15 +5,33 @@
 #include "dbDatabase.h"
 
 #include "dbChip.h"
+#include "dbChipBumpInst.h"
+#include "dbChipConn.h"
+#include "dbChipInst.h"
+#include "dbChipNet.h"
+#include "dbChipRegionInst.h"
+#include "dbProperty.h"
 #include "dbTable.h"
 #include "dbTable.hpp"
 #include "odb/db.h"
 #include "odb/dbSet.h"
 // User Code Begin Includes
 #include <algorithm>
+#include <atomic>
+#include <cassert>
+#include <cerrno>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <functional>
+#include <ios>
+#include <iostream>
+#include <istream>
 #include <map>
+#include <mutex>
+#include <ostream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -22,6 +40,11 @@
 #include "dbBlock.h"
 #include "dbCCSeg.h"
 #include "dbCapNode.h"
+#include "dbChipBumpInstItr.h"
+#include "dbChipConnItr.h"
+#include "dbChipInstItr.h"
+#include "dbChipNetItr.h"
+#include "dbChipRegionInstItr.h"
 #include "dbGDSLib.h"
 #include "dbITerm.h"
 #include "dbJournal.h"
@@ -37,7 +60,6 @@
 #include "odb/dbExtControl.h"
 #include "odb/dbStream.h"
 #include "utl/Logger.h"
-
 // User Code End Includes
 namespace odb {
 template class dbTable<_dbDatabase>;
@@ -62,7 +84,31 @@ bool _dbDatabase::operator==(const _dbDatabase& rhs) const
   if (_chip != rhs._chip) {
     return false;
   }
-  if (*_chip_tbl != *rhs._chip_tbl) {
+  if (dbu_per_micron_ != rhs.dbu_per_micron_) {
+    return false;
+  }
+  if (*chip_tbl_ != *rhs.chip_tbl_) {
+    return false;
+  }
+  if (chip_hash_ != rhs.chip_hash_) {
+    return false;
+  }
+  if (*_prop_tbl != *rhs._prop_tbl) {
+    return false;
+  }
+  if (*chip_inst_tbl_ != *rhs.chip_inst_tbl_) {
+    return false;
+  }
+  if (*chip_region_inst_tbl_ != *rhs.chip_region_inst_tbl_) {
+    return false;
+  }
+  if (*chip_conn_tbl_ != *rhs.chip_conn_tbl_) {
+    return false;
+  }
+  if (*chip_bump_inst_tbl_ != *rhs.chip_bump_inst_tbl_) {
+    return false;
+  }
+  if (*chip_net_tbl_ != *rhs.chip_net_tbl_) {
     return false;
   }
 
@@ -81,10 +127,6 @@ bool _dbDatabase::operator==(const _dbDatabase& rhs) const
     return false;
   }
   if (*_gds_lib_tbl != *rhs._gds_lib_tbl) {
-    return false;
-  }
-
-  if (*_prop_tbl != *rhs._prop_tbl) {
     return false;
   }
 
@@ -110,8 +152,28 @@ bool _dbDatabase::operator<(const _dbDatabase& rhs) const
 
 _dbDatabase::_dbDatabase(_dbDatabase* db)
 {
-  _chip_tbl = new dbTable<_dbChip, 2>(
+  dbu_per_micron_ = 0;
+  chip_tbl_ = new dbTable<_dbChip, 2>(
       this, this, (GetObjTbl_t) &_dbDatabase::getObjectTable, dbChipObj);
+  chip_hash_.setTable(chip_tbl_);
+  _prop_tbl = new dbTable<_dbProperty>(
+      this, this, (GetObjTbl_t) &_dbDatabase::getObjectTable, dbPropertyObj);
+  chip_inst_tbl_ = new dbTable<_dbChipInst>(
+      this, this, (GetObjTbl_t) &_dbDatabase::getObjectTable, dbChipInstObj);
+  chip_region_inst_tbl_ = new dbTable<_dbChipRegionInst>(
+      this,
+      this,
+      (GetObjTbl_t) &_dbDatabase::getObjectTable,
+      dbChipRegionInstObj);
+  chip_conn_tbl_ = new dbTable<_dbChipConn>(
+      this, this, (GetObjTbl_t) &_dbDatabase::getObjectTable, dbChipConnObj);
+  chip_bump_inst_tbl_
+      = new dbTable<_dbChipBumpInst>(this,
+                                     this,
+                                     (GetObjTbl_t) &_dbDatabase::getObjectTable,
+                                     dbChipBumpInstObj);
+  chip_net_tbl_ = new dbTable<_dbChipNet>(
+      this, this, (GetObjTbl_t) &_dbDatabase::getObjectTable, dbChipNetObj);
   // User Code Begin Constructor
   _magic1 = DB_MAGIC1;
   _magic2 = DB_MAGIC2;
@@ -130,13 +192,20 @@ _dbDatabase::_dbDatabase(_dbDatabase* db)
   _lib_tbl = new dbTable<_dbLib>(
       this, this, (GetObjTbl_t) &_dbDatabase::getObjectTable, dbLibObj);
 
-  _prop_tbl = new dbTable<_dbProperty>(
-      this, this, (GetObjTbl_t) &_dbDatabase::getObjectTable, dbPropertyObj);
-
   _name_cache = new _dbNameCache(
       this, this, (GetObjTbl_t) &_dbDatabase::getObjectTable);
 
   _prop_itr = new dbPropertyItr(_prop_tbl);
+
+  chip_inst_itr_ = new dbChipInstItr(chip_inst_tbl_);
+
+  chip_region_inst_itr_ = new dbChipRegionInstItr(chip_region_inst_tbl_);
+
+  chip_conn_itr_ = new dbChipConnItr(chip_conn_tbl_);
+
+  chip_bump_inst_itr_ = new dbChipBumpInstItr(chip_bump_inst_tbl_);
+
+  chip_net_itr_ = new dbChipNetItr(chip_net_tbl_);
   // User Code End Constructor
 }
 
@@ -186,20 +255,48 @@ dbIStream& operator>>(dbIStream& stream, _dbDatabase& obj)
   }
   stream >> *obj._tech_tbl;
   stream >> *obj._lib_tbl;
-  stream >> *obj._chip_tbl;
+  stream >> *obj.chip_tbl_;
   if (obj.isSchema(db_schema_gds_lib_in_block)) {
     stream >> *obj._gds_lib_tbl;
   }
   stream >> *obj._prop_tbl;
   stream >> *obj._name_cache;
-
+  if (obj.isSchema(db_schema_chip_hash_table)) {
+    stream >> obj.chip_hash_;
+  }
+  if (obj.isSchema(db_schema_chip_inst)) {
+    stream >> *obj.chip_inst_tbl_;
+  }
+  if (obj.isSchema(db_schema_chip_region)) {
+    stream >> *obj.chip_region_inst_tbl_;
+  }
+  if (obj.isSchema(db_schema_chip_region)) {
+    stream >> *obj.chip_conn_tbl_;
+  }
+  if (obj.isSchema(db_schema_chip_bump)) {
+    stream >> *obj.chip_bump_inst_tbl_;
+  }
+  if (obj.isSchema(db_schema_chip_bump)) {
+    stream >> *obj.chip_net_tbl_;
+  }
+  if (obj.isSchema(db_schema_dbu_per_micron)) {
+    if (obj.isLessThanSchema(db_schema_remove_dbu_per_micron)) {
+      // Should already have a value from dbTech, so only need to update this if
+      // its been set.
+      uint dbu_per_micron;
+      stream >> dbu_per_micron;
+      if (dbu_per_micron != 0) {
+        obj.dbu_per_micron_ = dbu_per_micron;
+      }
+    } else {
+      stream >> obj.dbu_per_micron_;
+    }
+  }
   // Set the _tech on the block & libs now they are loaded
   if (!obj.isSchema(db_schema_block_tech)) {
     if (obj._chip) {
-      _dbChip* chip = obj._chip_tbl->getPtr(obj._chip);
-      if (chip->_top) {
-        chip->_block_tbl->getPtr(chip->_top)->_tech = old_db_tech;
-      }
+      _dbChip* chip = obj.chip_tbl_->getPtr(obj._chip);
+      chip->tech_ = old_db_tech;
     }
 
     auto db_public = (dbDatabase*) &obj;
@@ -219,6 +316,19 @@ dbIStream& operator>>(dbIStream& stream, _dbDatabase& obj)
   // Set the revision of the database to the current revision
   obj._schema_major = db_schema_major;
   obj._schema_minor = db_schema_minor;
+
+  // Set the chipinsts_map_ of the chip
+  dbDatabase* db = (dbDatabase*) &obj;
+  for (const auto& inst : db->getChipInsts()) {
+    _dbChip* parent_chip = (_dbChip*) inst->getParentChip();
+    parent_chip->chipinsts_map_[inst->getName()] = inst->getId();
+  }
+  // Set the region_insts_map_ of the chipinst
+  for (const auto& chip_region_inst : db->getChipRegionInsts()) {
+    _dbChipInst* chipinst = (_dbChipInst*) chip_region_inst->getChipInst();
+    chipinst->region_insts_map_[chip_region_inst->getChipRegion()->getId()]
+        = chip_region_inst->getId();
+  }
   // User Code End >>
   return stream;
 }
@@ -235,11 +345,17 @@ dbOStream& operator<<(dbOStream& stream, const _dbDatabase& obj)
   stream << obj._chip;
   stream << *obj._tech_tbl;
   stream << *obj._lib_tbl;
-  stream << *obj._chip_tbl;
+  stream << *obj.chip_tbl_;
   stream << *obj._gds_lib_tbl;
   stream << NamedTable("prop_tbl", obj._prop_tbl);
   stream << *obj._name_cache;
-  stream << *obj._gds_lib_tbl;
+  stream << obj.chip_hash_;
+  stream << *obj.chip_inst_tbl_;
+  stream << *obj.chip_region_inst_tbl_;
+  stream << *obj.chip_conn_tbl_;
+  stream << *obj.chip_bump_inst_tbl_;
+  stream << *obj.chip_net_tbl_;
+  stream << obj.dbu_per_micron_;
   // User Code End <<
   return stream;
 }
@@ -248,7 +364,19 @@ dbObjectTable* _dbDatabase::getObjectTable(dbObjectType type)
 {
   switch (type) {
     case dbChipObj:
-      return _chip_tbl;
+      return chip_tbl_;
+    case dbPropertyObj:
+      return _prop_tbl;
+    case dbChipInstObj:
+      return chip_inst_tbl_;
+    case dbChipRegionInstObj:
+      return chip_region_inst_tbl_;
+    case dbChipConnObj:
+      return chip_conn_tbl_;
+    case dbChipBumpInstObj:
+      return chip_bump_inst_tbl_;
+    case dbChipNetObj:
+      return chip_net_tbl_;
       // User Code Begin getObjectTable
     case dbTechObj:
       return _tech_tbl;
@@ -258,9 +386,6 @@ dbObjectTable* _dbDatabase::getObjectTable(dbObjectType type)
 
     case dbGdsLibObj:
       return _gds_lib_tbl;
-
-    case dbPropertyObj:
-      return _prop_tbl;
     // User Code End getObjectTable
     default:
       break;
@@ -272,27 +397,49 @@ void _dbDatabase::collectMemInfo(MemInfo& info)
   info.cnt++;
   info.size += sizeof(*this);
 
-  _chip_tbl->collectMemInfo(info.children_["_chip_tbl"]);
+  chip_tbl_->collectMemInfo(info.children_["chip_tbl_"]);
+
+  _prop_tbl->collectMemInfo(info.children_["_prop_tbl"]);
+
+  chip_inst_tbl_->collectMemInfo(info.children_["chip_inst_tbl_"]);
+
+  chip_region_inst_tbl_->collectMemInfo(
+      info.children_["chip_region_inst_tbl_"]);
+
+  chip_conn_tbl_->collectMemInfo(info.children_["chip_conn_tbl_"]);
+
+  chip_bump_inst_tbl_->collectMemInfo(info.children_["chip_bump_inst_tbl_"]);
+
+  chip_net_tbl_->collectMemInfo(info.children_["chip_net_tbl_"]);
 
   // User Code Begin collectMemInfo
   _tech_tbl->collectMemInfo(info.children_["tech"]);
   _lib_tbl->collectMemInfo(info.children_["lib"]);
   _gds_lib_tbl->collectMemInfo(info.children_["gds_lib"]);
-  _prop_tbl->collectMemInfo(info.children_["prop"]);
   _name_cache->collectMemInfo(info.children_["name_cache"]);
   // User Code End collectMemInfo
 }
 
 _dbDatabase::~_dbDatabase()
 {
-  delete _chip_tbl;
+  delete chip_tbl_;
+  delete _prop_tbl;
+  delete chip_inst_tbl_;
+  delete chip_region_inst_tbl_;
+  delete chip_conn_tbl_;
+  delete chip_bump_inst_tbl_;
+  delete chip_net_tbl_;
   // User Code Begin Destructor
   delete _tech_tbl;
   delete _lib_tbl;
   delete _gds_lib_tbl;
-  delete _prop_tbl;
   delete _name_cache;
   delete _prop_itr;
+  delete chip_inst_itr_;
+  delete chip_region_inst_itr_;
+  delete chip_conn_itr_;
+  delete chip_bump_inst_itr_;
+  delete chip_net_itr_;
   // User Code End Destructor
 }
 
@@ -310,8 +457,9 @@ _dbDatabase::_dbDatabase(_dbDatabase* /* unused: db */, int id)
   _master_id = 0;
   _logger = nullptr;
   _unique_id = id;
+  dbu_per_micron_ = 0;
 
-  _chip_tbl = new dbTable<_dbChip, 2>(
+  chip_tbl_ = new dbTable<_dbChip, 2>(
       this, this, (GetObjTbl_t) &_dbDatabase::getObjectTable, dbChipObj);
 
   _gds_lib_tbl = new dbTable<_dbGDSLib, 2>(
@@ -330,6 +478,16 @@ _dbDatabase::_dbDatabase(_dbDatabase* /* unused: db */, int id)
       this, this, (GetObjTbl_t) &_dbDatabase::getObjectTable);
 
   _prop_itr = new dbPropertyItr(_prop_tbl);
+
+  chip_inst_itr_ = new dbChipInstItr(chip_inst_tbl_);
+
+  chip_region_inst_itr_ = new dbChipRegionInstItr(chip_region_inst_tbl_);
+
+  chip_conn_itr_ = new dbChipConnItr(chip_conn_tbl_);
+
+  chip_bump_inst_itr_ = new dbChipBumpInstItr(chip_bump_inst_tbl_);
+
+  chip_net_itr_ = new dbChipNetItr(chip_net_tbl_);
 }
 
 utl::Logger* _dbDatabase::getLogger() const
@@ -355,13 +513,75 @@ utl::Logger* _dbObject::getLogger() const
 //
 ////////////////////////////////////////////////////////////////////
 
+void dbDatabase::setDbuPerMicron(uint dbu_per_micron)
+{
+  _dbDatabase* obj = (_dbDatabase*) this;
+
+  obj->dbu_per_micron_ = dbu_per_micron;
+}
+
+uint dbDatabase::getDbuPerMicron() const
+{
+  _dbDatabase* obj = (_dbDatabase*) this;
+  return obj->dbu_per_micron_;
+}
+
 dbSet<dbChip> dbDatabase::getChips() const
 {
   _dbDatabase* obj = (_dbDatabase*) this;
-  return dbSet<dbChip>(obj, obj->_chip_tbl);
+  return dbSet<dbChip>(obj, obj->chip_tbl_);
+}
+
+dbChip* dbDatabase::findChip(const char* name) const
+{
+  _dbDatabase* obj = (_dbDatabase*) this;
+  return (dbChip*) obj->chip_hash_.find(name);
+}
+
+dbSet<dbProperty> dbDatabase::getProperties() const
+{
+  _dbDatabase* obj = (_dbDatabase*) this;
+  return dbSet<dbProperty>(obj, obj->_prop_tbl);
+}
+
+dbSet<dbChipInst> dbDatabase::getChipInsts() const
+{
+  _dbDatabase* obj = (_dbDatabase*) this;
+  return dbSet<dbChipInst>(obj, obj->chip_inst_tbl_);
+}
+
+dbSet<dbChipRegionInst> dbDatabase::getChipRegionInsts() const
+{
+  _dbDatabase* obj = (_dbDatabase*) this;
+  return dbSet<dbChipRegionInst>(obj, obj->chip_region_inst_tbl_);
+}
+
+dbSet<dbChipConn> dbDatabase::getChipConns() const
+{
+  _dbDatabase* obj = (_dbDatabase*) this;
+  return dbSet<dbChipConn>(obj, obj->chip_conn_tbl_);
+}
+
+dbSet<dbChipBumpInst> dbDatabase::getChipBumpInsts() const
+{
+  _dbDatabase* obj = (_dbDatabase*) this;
+  return dbSet<dbChipBumpInst>(obj, obj->chip_bump_inst_tbl_);
+}
+
+dbSet<dbChipNet> dbDatabase::getChipNets() const
+{
+  _dbDatabase* obj = (_dbDatabase*) this;
+  return dbSet<dbChipNet>(obj, obj->chip_net_tbl_);
 }
 
 // User Code Begin dbDatabasePublicMethods
+
+void dbDatabase::setTopChip(dbChip* chip)
+{
+  _dbDatabase* db = (_dbDatabase*) this;
+  db->_chip = chip->getImpl()->getOID();
+}
+
 dbSet<dbLib> dbDatabase::getLibs()
 {
   _dbDatabase* db = (_dbDatabase*) this;
@@ -457,7 +677,7 @@ dbChip* dbDatabase::getChip()
     return nullptr;
   }
 
-  return (dbChip*) db->_chip_tbl->getPtr(db->_chip);
+  return (dbChip*) db->chip_tbl_->getPtr(db->_chip);
 }
 
 dbTech* dbDatabase::getTech()
@@ -497,47 +717,104 @@ void dbDatabase::write(std::ostream& file)
 void dbDatabase::beginEco(dbBlock* block_)
 {
   _dbBlock* block = (_dbBlock*) block_;
-
-  {
-    delete block->_journal;
+  if (block->_journal) {
+    endEco(block_);
   }
-
   block->_journal = new dbJournal(block_);
   assert(block->_journal);
+  debugPrint(block_->getImpl()->getLogger(),
+             utl::ODB,
+             "DB_ECO",
+             2,
+             "ECO: Started ECO #{}",
+             block->_journal_stack.size());
 }
 
 void dbDatabase::endEco(dbBlock* block_)
 {
   _dbBlock* block = (_dbBlock*) block_;
-  dbJournal* eco = block->_journal;
+  assert(block->_journal);
+  block->_journal_stack.push(block->_journal);
   block->_journal = nullptr;
+  debugPrint(block_->getImpl()->getLogger(),
+             utl::ODB,
+             "DB_ECO",
+             2,
+             "ECO: Ended ECO #{} (size {}) and pushed to ECO stack",
+             block->_journal_stack.size() - 1,
+             block->_journal_stack.top()->size());
+}
 
-  {
-    delete block->_journal_pending;
+void dbDatabase::commitEco(dbBlock* block_)
+{
+  _dbBlock* block = (_dbBlock*) block_;
+  // Commit the current ECO or the last ECO into stack
+  assert(block->_journal || !block->_journal_stack.empty());
+  if (!block->_journal) {
+    block->_journal = block->_journal_stack.top();
+    block->_journal_stack.pop();
   }
+  if (!block->_journal_stack.empty()) {
+    dbJournal* prev_journal = block->_journal_stack.top();
+    int old_size = prev_journal->size();
+    prev_journal->append(block->_journal);
+    debugPrint(block_->getImpl()->getLogger(),
+               utl::ODB,
+               "DB_ECO",
+               2,
+               "ECO: Merged ECO #{} (size {}) with ECO #{} (size {} -> {})",
+               block->_journal_stack.size(),
+               block->_journal->size(),
+               block->_journal_stack.size() - 1,
+               old_size,
+               block->_journal_stack.top()->size());
+  } else {
+    debugPrint(block_->getImpl()->getLogger(),
+               utl::ODB,
+               "DB_ECO",
+               2,
+               "ECO: Committed ECO #{} (size {}) and removed from ECO stack",
+               block->_journal_stack.size(),
+               block->_journal->size());
+  }
+  delete block->_journal;
+  block->_journal = nullptr;
+}
 
-  block->_journal_pending = eco;
+void dbDatabase::undoEco(dbBlock* block_)
+{
+  _dbBlock* block = (_dbBlock*) block_;
+  assert(block->_journal || !block->_journal_stack.empty());
+  if (!block->_journal) {
+    block->_journal = block->_journal_stack.top();
+    block->_journal_stack.pop();
+  }
+  debugPrint(block_->getImpl()->getLogger(),
+             utl::ODB,
+             "DB_ECO",
+             2,
+             "ECO: Undid ECO #{} (size {})",
+             block->_journal_stack.size(),
+             block->_journal->size());
+  dbJournal* journal = block->_journal;
+  block->_journal = nullptr;
+  journal->undo();
+  delete block->_journal;
 }
 
 bool dbDatabase::ecoEmpty(dbBlock* block_)
 {
   _dbBlock* block = (_dbBlock*) block_;
-
   if (block->_journal) {
     return block->_journal->empty();
   }
-
   return false;
 }
 
-int dbDatabase::checkEco(dbBlock* block_)
+bool dbDatabase::ecoStackEmpty(dbBlock* block_)
 {
   _dbBlock* block = (_dbBlock*) block_;
-
-  if (block->_journal) {
-    return block->_journal->size();
-  }
-  return 0;
+  return block->_journal_stack.empty();
 }
 
 void dbDatabase::readEco(dbBlock* block_, const char* filename)
@@ -554,11 +831,10 @@ void dbDatabase::readEco(dbBlock* block_, const char* filename)
   assert(eco);
   stream >> *eco;
 
-  {
-    delete block->_journal_pending;
-  }
-
-  block->_journal_pending = eco;
+  delete block->_journal;
+  block->_journal = nullptr;
+  eco->redo();
+  block->_journal = eco;
 }
 
 void dbDatabase::writeEco(dbBlock* block_, const char* filename)
@@ -576,33 +852,12 @@ void dbDatabase::writeEco(dbBlock* block_, const char* filename)
   file.exceptions(std::ifstream::failbit | std::ifstream::badbit
                   | std::ios::eofbit);
 
-  if (block->_journal_pending) {
+  if (block->_journal) {
     dbOStream stream(block->getDatabase(), file);
-    stream << *block->_journal_pending;
-  }
-}
-
-void dbDatabase::commitEco(dbBlock* block_)
-{
-  _dbBlock* block = (_dbBlock*) block_;
-
-  // TODO: Need a check to ensure the commit is not applied to the block of
-  // which this eco was generated from.
-  if (block->_journal_pending) {
-    block->_journal_pending->redo();
-    delete block->_journal_pending;
-    block->_journal_pending = nullptr;
-  }
-}
-
-void dbDatabase::undoEco(dbBlock* block_)
-{
-  _dbBlock* block = (_dbBlock*) block_;
-
-  if (block->_journal_pending) {
-    block->_journal_pending->undo();
-    delete block->_journal_pending;
-    block->_journal_pending = nullptr;
+    stream << *block->_journal;
+  } else if (!block->_journal_stack.empty()) {
+    dbOStream stream(block->getDatabase(), file);
+    stream << *block->_journal_stack.top();
   }
 }
 
@@ -703,6 +958,8 @@ void dbDatabase::triggerPostReadLef(dbTech* tech, dbLib* library)
 
 void dbDatabase::triggerPostReadDef(dbBlock* block, const bool floorplan)
 {
+  block->setCoreArea(block->computeCoreArea());
+
   _dbDatabase* db = (_dbDatabase*) this;
   for (dbDatabaseObserver* observer : db->observers_) {
     if (floorplan) {
@@ -710,6 +967,14 @@ void dbDatabase::triggerPostReadDef(dbBlock* block, const bool floorplan)
     } else {
       observer->postReadDef(block);
     }
+  }
+}
+
+void dbDatabase::triggerPostRead3Dbx(dbChip* chip)
+{
+  _dbDatabase* db = (_dbDatabase*) this;
+  for (dbDatabaseObserver* observer : db->observers_) {
+    observer->postRead3Dbx(chip);
   }
 }
 

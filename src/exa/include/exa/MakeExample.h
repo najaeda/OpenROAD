@@ -12,25 +12,12 @@
 
 #pragma once
 
-#include <tcl.h>
-
-namespace odb {
-class dbDatabase;
-}
-
-namespace utl {
-class Logger;
-}
+#include "tcl.h"
 
 namespace exa {
 
 class Example;
 
-exa::Example* makeExample();
-void initExample(exa::Example* example,
-                 odb::dbDatabase* db,
-                 utl::Logger* logger,
-                 Tcl_Interp* tcl_interp);
-void deleteExample(exa::Example* example);
+void initExample(Tcl_Interp* tcl_interp);
 
 }  // namespace exa

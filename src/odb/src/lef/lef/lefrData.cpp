@@ -28,12 +28,14 @@
 // *****************************************************************************
 #include "lefrData.hpp"
 
-#include <sys/stat.h>
-
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <filesystem>
+#include <system_error>
 
+#include "lefiKRDefs.hpp"
 #include "lefrSettings.hpp"
 
 BEGIN_LEF_PARSER_NAMESPACE
@@ -62,7 +64,6 @@ lefrData::lefrData()
   current_token[0] = '\0';
 
   // lef_lex_init()
-  struct stat statbuf;
 
   // initRingBuffer();
   int i;
@@ -95,10 +96,12 @@ lefrData::lefrData()
 
   // 4/11/2003 - Remove file lefrRWarning.log from directory if it exist
   // pcr 569729
-  if (stat("lefRWarning.log", &statbuf) != -1) {
+  std::error_code err_ignored;
+  const auto warning_file = std::filesystem::path("lefRWarning.log");
+  if (std::filesystem::exists(warning_file, err_ignored)) {
     // file exist, remove it
     if (!lefSettings->LogFileAppend) {
-      remove("lefRWarning.log");
+      std::filesystem::remove(warning_file, err_ignored);
     }
   }
 

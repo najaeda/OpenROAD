@@ -5,7 +5,8 @@
 
 #include <algorithm>
 #include <cmath>
-#include <iostream>
+#include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <memory>
 #include <string>
@@ -16,6 +17,7 @@
 #include "grt/Rudy.h"
 #include "nesterovBase.h"
 #include "odb/db.h"
+#include "odb/dbTypes.h"
 #include "utl/Logger.h"
 
 using odb::dbBlock;
@@ -218,8 +220,8 @@ RouteBaseVars::RouteBaseVars()
 
 void RouteBaseVars::reset()
 {
-  inflationRatioCoef = 3;
-  maxInflationRatio = 6;
+  inflationRatioCoef = 2;
+  maxInflationRatio = 3;
   maxDensity = 0.90;
   targetRC = 1.01;
   ignoreEdgeRatio = 0.8;
@@ -721,6 +723,7 @@ std::pair<bool, bool> RouteBase::routability(
 
   // updateArea
   nbVec_[0]->updateAreas();
+  nbVec_[0]->checkConsistency();
 
   double new_total_gcells_area
       = nbVec_[0]->getNesterovInstsArea() + nbVec_[0]->getTotalFillerArea();

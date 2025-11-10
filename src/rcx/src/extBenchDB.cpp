@@ -1,11 +1,20 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2019-2025, The OpenROAD Authors
 
+#include <string.h>
+
 #include <cfloat>
-#include <map>
+#include <cmath>
+#include <cstdio>
+#include <cstring>
+#include <memory>
 #include <vector>
 
+#include "odb/array1.h"
 #include "odb/db.h"
+#include "odb/dbSet.h"
+#include "odb/dbTypes.h"
+#include "odb/util.h"
 #include "parse.h"
 #include "rcx/extRCap.h"
 #include "rcx/extSpef.h"
@@ -13,8 +22,7 @@
 #include "rcx/extprocess.h"
 #include "utl/Logger.h"
 
-namespace rcx {
-
+using odb::Ath__array1D;
 using odb::dbBTerm;
 using odb::dbCapNode;
 using odb::dbCCSeg;
@@ -24,6 +32,8 @@ using odb::dbObstruction;
 using odb::dbSet;
 using odb::dbTechLayer;
 using utl::RCX;
+
+namespace rcx {
 
 extMetRCTable* extRCModel::initCapTables(uint layerCnt, uint widthCnt)
 {
@@ -36,7 +46,7 @@ extMetRCTable* extRCModel::initCapTables(uint layerCnt, uint widthCnt)
   _modelTable[0]->allocateInitialTables(widthCnt, true, true, true);
   return _modelTable[0];
 }
-AthPool<extDistRC>* extMetRCTable::getRCPool()
+odb::AthPool<extDistRC>* extMetRCTable::getRCPool()
 {
   return _rcPoolPtr;
 }
@@ -55,7 +65,7 @@ uint extMain::GenExtRules(const char* rulesFileName)
 
   extMetRCTable* rcModel = extRulesModel->initCapTables(layerCnt, widthCnt);
 
-  AthPool<extDistRC>* rcPool = rcModel->getRCPool();
+  odb::AthPool<extDistRC>* rcPool = rcModel->getRCPool();
   extMeasure m(nullptr);
   m._diagModel = 1;
   uint openWireNumber = 1;
@@ -430,8 +440,8 @@ uint extMain::benchVerilog_assign(FILE* fp)
 }
 uint extRCModel::benchDB_WS(extMainOptions* opt, extMeasure* measure)
 {
-  Ath__array1D<double>* widthTable = new Ath__array1D<double>(4);
-  Ath__array1D<double>* spaceTable = new Ath__array1D<double>(4);
+  auto widthTable = std::make_unique<Ath__array1D<double>>(4);
+  auto spaceTable = std::make_unique<Ath__array1D<double>>(4);
   Ath__array1D<double>* wTable = &opt->_widthTable;
   Ath__array1D<double>* sTable = &opt->_spaceTable;
   Ath__array1D<double>* gTable = &opt->_gridTable;
@@ -460,10 +470,11 @@ uint extRCModel::benchDB_WS(extMainOptions* opt, extMeasure* measure)
     return 0;
     wTable->resetCnt();
     sTable->resetCnt();
-    dbSet<dbTechNonDefaultRule> nd_rules = opt->_tech->getNonDefaultRules();
-    dbSet<dbTechNonDefaultRule>::iterator nditr;
-    dbTechLayerRule* tst_rule;
-    //		dbTechNonDefaultRule  *wdth_rule = nullptr;
+    dbSet<odb::dbTechNonDefaultRule> nd_rules
+        = opt->_tech->getNonDefaultRules();
+    dbSet<odb::dbTechNonDefaultRule>::iterator nditr;
+    odb::dbTechLayerRule* tst_rule;
+    //		odb::dbTechNonDefaultRule  *wdth_rule = nullptr;
 
     for (nditr = nd_rules.begin(); nditr != nd_rules.end(); ++nditr) {
       tst_rule = (*nditr)->getLayerRule(layer);

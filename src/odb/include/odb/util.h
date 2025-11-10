@@ -4,11 +4,13 @@
 #pragma once
 
 #include <cassert>
+#include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
 
-#include "array1.h"
+#include "odb/array1.h"
 
 namespace utl {
 class Logger;

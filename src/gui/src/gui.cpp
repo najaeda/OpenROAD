@@ -4,19 +4,33 @@
 #include "gui/gui.h"
 
 #include <QApplication>
+#include <QColor>
+#include <QPushButton>
+#include <QString>
+#include <QWidget>
+#include <algorithm>
+#include <any>
+#include <cstddef>
+#include <cstdint>
+#include <cstdlib>
+#include <exception>
+#include <map>
+#include <memory>
+#include <typeindex>
+#include <utility>
+#include <variant>
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
 #include <QRegularExpression>
 #else
 #include <QRegExp>
 #endif
-#include <boost/algorithm/string/predicate.hpp>
 #include <cmath>
 #include <optional>
 #include <stdexcept>
 #include <string>
-#include <utility>
 #include <vector>
 
+#include "boost/algorithm/string/predicate.hpp"
 #include "chartsWidget.h"
 #include "clockWidget.h"
 #include "displayControls.h"
@@ -29,6 +43,7 @@
 #include "layoutViewer.h"
 #include "mainWindow.h"
 #include "odb/db.h"
+#include "odb/dbObject.h"
 #include "odb/dbShape.h"
 #include "odb/geom.h"
 #include "ord/OpenRoad.hh"
@@ -193,15 +208,11 @@ static void resetConversions()
       = [](const std::string& value, bool*) { return 0; };
 }
 
-Gui* Gui::singleton_ = nullptr;
-
 Gui* Gui::get()
 {
-  if (singleton_ == nullptr) {
-    singleton_ = new Gui();
-  }
+  static Gui* singleton = new Gui();
 
-  return singleton_;
+  return singleton;
 }
 
 Gui::Gui()
@@ -317,6 +328,11 @@ void Gui::addSelectedInst(const char* name)
   }
 
   main_window->addSelected(makeSelected(inst));
+}
+
+const SelectionSet& Gui::selection()
+{
+  return main_window->selection();
 }
 
 bool Gui::anyObjectInSet(bool selection_set, odb::dbObjectType obj_type) const
@@ -517,7 +533,7 @@ int Gui::select(const std::string& type,
         bool is_valid_attribute = false;
         Descriptor::Properties properties
             = descriptor->getProperties(sel.getObject());
-        if (filterSelectionProperties(
+        if (!filterSelectionProperties(
                 properties, attribute, value, is_valid_attribute)) {
           return;  // doesn't match the attribute filter
         }
@@ -763,7 +779,7 @@ void Gui::saveImage(const std::string& filename,
     if (tech == nullptr) {
       logger_->error(utl::GUI, 16, "No design loaded.");
     }
-    const double dbu_per_micron = tech->getLefUnits();
+    const double dbu_per_micron = tech->getDbUnitsPerMicron();
 
     std::string save_cmds;
     // build display control commands
@@ -1435,6 +1451,10 @@ void Gui::gifStart(const std::string& filename)
     logger_->error(utl::GUI, 49, "Cannot generate GIF without GUI enabled");
   }
 
+  if (filename.empty()) {
+    logger_->error(utl::GUI, 81, "Filename is required to save a GIF.");
+  }
+
   gif_ = std::make_unique<GIF>();
   gif_->filename = filename;
   gif_->writer = nullptr;
@@ -1531,6 +1551,15 @@ void Gui::gifEnd()
     return;
   }
 
+  if (gif_->writer == nullptr) {
+    logger_->warn(utl::GUI,
+                  75,
+                  "Nothing to save to {}. No frames added to gif.",
+                  gif_->filename);
+    gif_ = nullptr;
+    return;
+  }
+
   GifEnd(gif_->writer.get());
   gif_ = nullptr;
 }
@@ -1546,6 +1575,12 @@ class SafeApplication : public QApplication
       return QApplication::notify(receiver, event);
     } catch (std::exception& ex) {
       // Ignored here as the message will be logged in the GUI
+      qDebug() << "Caught exception:" << ex.what();
+
+      // Returning true indicates the event has been handled. In this case,
+      // we've "handled" it by catching the exception, so we prevent
+      // further processing that might rely on a corrupt state.
+      return true;
     }
 
     return false;

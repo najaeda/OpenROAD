@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <QColor>
 #include <QColorDialog>
 #include <QDialog>
 #include <QDockWidget>
@@ -14,19 +15,24 @@
 #include <QRadioButton>
 #include <QSettings>
 #include <QStandardItemModel>
+#include <QString>
 #include <QStringList>
 #include <QTextEdit>
 #include <QTreeView>
 #include <QVBoxLayout>
+#include <QVariant>
+#include <QWidget>
 #include <functional>
 #include <map>
 #include <optional>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "db_sta/dbNetwork.hh"
 #include "gui/gui.h"
+#include "odb/db.h"
 #include "odb/dbBlockCallBackObj.h"
 #include "options.h"
 
@@ -265,7 +271,7 @@ class DisplayControls : public QDockWidget,
   // options displayed need to match
   void blockLoaded(odb::dbBlock* block);
 
-  void setCurrentBlock(odb::dbBlock* block);
+  void setCurrentChip(odb::dbChip* chip);
 
   // This is called by the check boxes to update the state
   void itemChanged(QStandardItem* item);

@@ -8,7 +8,9 @@
 #include "dbCore.h"
 #include "dbHashTable.hpp"
 #include "dbVector.h"
+#include "odb/dbId.h"
 #include "odb/dbMatrix.h"
+#include "odb/dbObject.h"
 #include "odb/dbTypes.h"
 #include "odb/odb.h"
 
@@ -62,7 +64,6 @@ class _dbTech : public _dbObject
   int _layer_cnt;
   int _rlayer_cnt;
   int _lef_units;
-  int _dbu_per_micron;
   int _mfgrid;
   _dbTechFlags _flags;
   dbId<_dbTechLayer> _bottom;

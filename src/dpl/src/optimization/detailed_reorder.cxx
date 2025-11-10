@@ -4,11 +4,18 @@
 #include "detailed_reorder.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
+#include <cstdint>
+#include <cstdlib>
 #include <limits>
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 #include "detailed_manager.h"
+#include "dpl/Opendp.h"
+#include "infrastructure/Coordinates.h"
 #include "infrastructure/architecture.h"
 #include "infrastructure/detailed_segment.h"
 #include "util/utility.h"

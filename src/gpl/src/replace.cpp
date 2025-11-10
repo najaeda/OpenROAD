@@ -4,18 +4,20 @@
 #include "gpl/Replace.h"
 
 #include <algorithm>
-#include <iostream>
+#include <chrono>
 #include <memory>
+#include <string>
 #include <utility>
 
 #include "db_sta/dbNetwork.hh"
 #include "db_sta/dbSta.hh"
+#include "gpl/AbstractGraphics.h"
+#include "graphicsNone.h"
 #include "initialPlace.h"
 #include "mbff.h"
 #include "nesterovBase.h"
 #include "nesterovPlace.h"
 #include "odb/db.h"
-#include "ord/OpenRoad.hh"
 #include "placerBase.h"
 #include "routeBase.h"
 #include "rsz/Resizer.hh"
@@ -27,21 +29,21 @@ namespace gpl {
 
 using utl::GPL;
 
-Replace::Replace() = default;
+Replace::Replace(odb::dbDatabase* odb,
+                 sta::dbSta* sta,
+                 rsz::Resizer* resizer,
+                 grt::GlobalRouter* router,
+                 utl::Logger* logger)
+    : db_(odb), sta_(sta), rs_(resizer), fr_(router), log_(logger)
+{
+  graphics_ = std::make_unique<GraphicsNone>();
+}
 
 Replace::~Replace() = default;
 
-void Replace::init(odb::dbDatabase* odb,
-                   sta::dbSta* sta,
-                   rsz::Resizer* resizer,
-                   grt::GlobalRouter* router,
-                   utl::Logger* logger)
+void Replace::setGraphicsInterface(const AbstractGraphics& graphics)
 {
-  db_ = odb;
-  sta_ = sta;
-  rs_ = resizer;
-  fr_ = router;
-  log_ = logger;
+  graphics_ = graphics.MakeNew(log_);
 }
 
 void Replace::reset()
@@ -79,8 +81,8 @@ void Replace::reset()
   routabilityCheckOverflow_ = 0.3;
   routabilityMaxDensity_ = 0.99;
   routabilityTargetRcMetric_ = 1.01;
-  routabilityInflationRatioCoef_ = 3;
-  routabilityMaxInflationRatio_ = 6;
+  routabilityInflationRatioCoef_ = 2;
+  routabilityMaxInflationRatio_ = 3;
   routabilityRcK1_ = routabilityRcK2_ = 1.0;
   routabilityRcK3_ = routabilityRcK4_ = 0.0;
   routabilityMaxInflationIter_ = 4;
@@ -118,10 +120,9 @@ void Replace::doIncrementalPlace(int threads)
 
     pbVec_.push_back(std::make_shared<PlacerBase>(db_, pbc_, log_));
 
-    for (auto pd : db_->getChip()->getBlock()->getPowerDomains()) {
-      if (pd->getGroup()) {
-        pbVec_.push_back(
-            std::make_shared<PlacerBase>(db_, pbc_, log_, pd->getGroup()));
+    for (auto pd : db_->getChip()->getBlock()->getRegions()) {
+      for (auto group : pd->getGroups()) {
+        pbVec_.push_back(std::make_shared<PlacerBase>(db_, pbc_, log_, group));
       }
     }
 
@@ -197,14 +198,17 @@ void Replace::doInitialPlace(int threads)
 
     pbVec_.push_back(std::make_shared<PlacerBase>(db_, pbc_, log_));
 
-    for (auto pd : db_->getChip()->getBlock()->getPowerDomains()) {
-      if (pd->getGroup()) {
-        pbVec_.push_back(
-            std::make_shared<PlacerBase>(db_, pbc_, log_, pd->getGroup()));
+    for (auto pd : db_->getChip()->getBlock()->getRegions()) {
+      for (auto group : pd->getGroups()) {
+        pbVec_.push_back(std::make_shared<PlacerBase>(db_, pbc_, log_, group));
       }
     }
 
     if (pbVec_.front()->placeInsts().empty()) {
+      log_->warn(
+          GPL,
+          123,
+          "No placeable instances in the top-level region. Removing it.");
       pbVec_.erase(pbVec_.begin());
     }
 
@@ -223,7 +227,7 @@ void Replace::doInitialPlace(int threads)
   ipVars.debug = gui_debug_initial_;
 
   std::unique_ptr<InitialPlace> ip(
-      new InitialPlace(ipVars, pbc_, pbVec_, log_));
+      new InitialPlace(ipVars, pbc_, pbVec_, graphics_->MakeNew(log_), log_));
   ip_ = std::move(ip);
   ip_->doBicgstabPlace(threads);
 }
@@ -234,7 +238,15 @@ void Replace::runMBFF(int max_sz,
                       int threads,
                       int num_paths)
 {
-  MBFF pntset(db_, sta_, log_, rs_, threads, 20, num_paths, gui_debug_);
+  MBFF pntset(db_,
+              sta_,
+              log_,
+              rs_,
+              threads,
+              20,
+              num_paths,
+              gui_debug_,
+              graphics_->MakeNew(log_));
   pntset.Run(max_sz, alpha, beta);
 }
 
@@ -250,10 +262,9 @@ bool Replace::initNesterovPlace(int threads)
 
     pbVec_.push_back(std::make_shared<PlacerBase>(db_, pbc_, log_));
 
-    for (auto pd : db_->getChip()->getBlock()->getPowerDomains()) {
-      if (pd->getGroup()) {
-        pbVec_.push_back(
-            std::make_shared<PlacerBase>(db_, pbc_, log_, pd->getGroup()));
+    for (auto pd : db_->getChip()->getBlock()->getRegions()) {
+      for (auto group : pd->getGroups()) {
+        pbVec_.push_back(std::make_shared<PlacerBase>(db_, pbc_, log_, group));
       }
     }
 
@@ -276,6 +287,8 @@ bool Replace::initNesterovPlace(int threads)
       nbVars.isSetBinCnt = true;
       nbVars.binCntX = binGridCntX_;
       nbVars.binCntY = binGridCntY_;
+      nbVars.minPhiCoef = minPhiCoef_;
+      nbVars.maxPhiCoef = maxPhiCoef_;
     }
 
     nbVars.useUniformTargetDensity = uniformTargetDensityMode_;
@@ -313,8 +326,6 @@ bool Replace::initNesterovPlace(int threads)
   if (!np_) {
     NesterovPlaceVars npVars;
 
-    npVars.minPhiCoef = minPhiCoef_;
-    npVars.maxPhiCoef = maxPhiCoef_;
     npVars.referenceHpwl = referenceHpwl_;
     npVars.routability_end_overflow = routabilityCheckOverflow_;
     npVars.keepResizeBelowOverflow = keepResizeBelowOverflow_;
@@ -338,10 +349,15 @@ bool Replace::initNesterovPlace(int threads)
       nb->setNpVars(&npVars);
     }
 
-    std::unique_ptr<NesterovPlace> np(
-        new NesterovPlace(npVars, pbc_, nbc_, pbVec_, nbVec_, rb_, tb_, log_));
-
-    np_ = std::move(np);
+    np_ = std::make_unique<NesterovPlace>(npVars,
+                                          pbc_,
+                                          nbc_,
+                                          pbVec_,
+                                          nbVec_,
+                                          rb_,
+                                          tb_,
+                                          graphics_->MakeNew(log_),
+                                          log_);
   }
   return true;
 }
@@ -440,6 +456,8 @@ float Replace::getUniformTargetDensity(int threads)
 {
   log_->info(GPL, 22, "Initialize gpl and calculate uniform density.");
   log_->redirectStringBegin();
+
+  setSkipIoMode(true);  // in case bterms are not placed
 
   float density = 1.0f;
   if (initNesterovPlace(threads)) {

@@ -3,8 +3,15 @@
 
 #include "rcx/extprocess.h"
 
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+
+#include "odb/array1.h"
 #include "parse.h"
 #include "utl/Logger.h"
+
+using odb::Ath__array1D;
 
 namespace rcx {
 

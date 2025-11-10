@@ -47,10 +47,13 @@
 
 #include "defwWriterCalls.hpp"
 
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
 #include "defiDebug.hpp"
+#include "defiDefs.hpp"
+#include "defiKRDefs.hpp"
 #include "defrData.hpp"
 #include "defwWriter.hpp"
 

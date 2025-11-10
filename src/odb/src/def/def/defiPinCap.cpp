@@ -29,13 +29,19 @@
 
 #include "defiPinCap.hpp"
 
+#include <string.h>
+
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
 #include "defiComponent.hpp"
 #include "defiDebug.hpp"
+#include "defiKRDefs.hpp"
+#include "defiMisc.hpp"
 #include "defiUtil.hpp"
 #include "defrData.hpp"
+#include "defrSettings.hpp"
 
 BEGIN_DEF_PARSER_NAMESPACE
 

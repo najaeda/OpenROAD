@@ -1,10 +1,20 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2024-2025, The OpenROAD Authors
 
-#include <map>
+#include <string.h>
+
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <vector>
 
 #include "gseq.h"
+#include "odb/array1.h"
+#include "odb/db.h"
+#include "odb/dbSet.h"
+#include "odb/dbShape.h"
+#include "odb/geom.h"
+#include "odb/util.h"
 #include "parse.h"
 #include "rcx/dbUtil.h"
 #include "rcx/extMeasureRC.h"
@@ -12,9 +22,17 @@
 #include "rcx/grids.h"
 #include "utl/Logger.h"
 
-namespace rcx {
+using odb::Ath__array1D;
+using odb::dbCapNode;
+using odb::dbInst;
+using odb::dbInstShapeItr;
+using odb::dbITermShapeItr;
+using odb::dbNet;
+using odb::dbSet;
+using odb::dbWirePath;
+using odb::Rect;
 
-using namespace odb;
+namespace rcx {
 
 void extMain::initRunEnv(extMeasureRC& m)
 {
@@ -132,7 +150,7 @@ int extMain::initSearch(LayerDimensionData& tables,
 
   tables.maxWidth = maxWidth;
 
-  logger_->info(RCX, 43, "{} wires to be extracted", totWireCnt);
+  logger_->info(utl::RCX, 43, "{} wires to be extracted", totWireCnt);
 
   return layerCnt;
 }
@@ -180,7 +198,7 @@ uint extMain::couplingFlow_v2(Rect& extRect, uint ccDist, extMeasure* m1)
   // TODO mrc->_progressTracker =
   // std::make_unique<ExtProgressTracker>(totWireCnt);
 
-  mrc->_seqmentPool = new AthPool<extSegment>(1024);
+  mrc->_seqmentPool = new odb::AthPool<extSegment>(1024);
 
   uint totalWiresExtracted = 0;
   float previous_percent_extracted = 0.0;
@@ -283,7 +301,7 @@ uint extMain::couplingFlow_v2_opt(Rect& extRect, uint ccDist, extMeasure* m1)
               tables.maxWidth,
               1000);
 
-  mrc->_seqmentPool = new AthPool<extSegment>(1024);
+  mrc->_seqmentPool = new odb::AthPool<extSegment>(1024);
 
   uint totalWiresExtracted = 0;
   float previous_percent_extracted = 0.0;
@@ -366,7 +384,7 @@ uint extMain::couplingFlow_v2_opt(Rect& extRect, uint ccDist, extMeasure* m1)
   return 0;
 }
 
-void extMain::setExtControl_v2(AthPool<SEQ>* seqPool)
+void extMain::setExtControl_v2(odb::AthPool<SEQ>* seqPool)
 {
   OverlapAdjust overlapAdj = Z_noAdjust;
   _useDbSdb = true;
@@ -800,7 +818,7 @@ bool extRCModel::readRules(char* name,
       if (cornerCnt > 0) {
         if ((rulesFileModelCnt > 0) && (rulesFileModelCnt < cornerCnt)) {
           logger_->warn(
-              RCX,
+              utl::RCX,
               226,
               "There were {} extraction models defined but only {} exists "
               "in the extraction rules file {}",
@@ -824,7 +842,7 @@ bool extRCModel::readRules(char* name,
             break;
           }
           if (kk == rulesFileModelCnt) {
-            logger_->warn(RCX,
+            logger_->warn(utl::RCX,
                           228,
                           "Cannot find model index {} in extRules file {}",
                           modelIndex,
@@ -1421,15 +1439,15 @@ uint extDistWidthRCTable::readRulesUnder(Ath__parser* parser,
   }
   return cnt;
 }
-uint extRCModel::calcMinMaxRC(dbTech* tech, const char* out_file)
+uint extRCModel::calcMinMaxRC(odb::dbTech* tech, const char* out_file)
 {
-  dbSet<dbTechLayer> layers = tech->getLayers();
-  dbSet<dbTechLayer>::iterator itr;
+  dbSet<odb::dbTechLayer> layers = tech->getLayers();
+  dbSet<odb::dbTechLayer>::iterator itr;
 
   FILE* fp = openFile(out_file, "", "", "w");
   uint cnt = 0;
   for (itr = layers.begin(); itr != layers.end(); ++itr) {
-    dbTechLayer* layer = *itr;
+    odb::dbTechLayer* layer = *itr;
 
     if (layer->getRoutingLevel() == 0) {
       continue;
@@ -1543,8 +1561,8 @@ void extMain::addItermShapesOnPlanes(dbInst* inst,
                                      const bool rotatedFlag,
                                      const bool swap_coords)
 {
-  for (dbITerm* iterm : inst->getITerms()) {
-    dbShape s;
+  for (odb::dbITerm* iterm : inst->getITerms()) {
+    odb::dbShape s;
     dbITermShapeItr term_shapes;
     for (term_shapes.begin(iterm); term_shapes.next(s);) {
       if (s.isVia()) {
@@ -1562,7 +1580,7 @@ void extMain::addItermShapesOnPlanes(dbInst* inst,
   }
 }
 
-void extMain::addShapeOnGs(dbShape* s, const bool swap_coords)
+void extMain::addShapeOnGs(odb::dbShape* s, const bool swap_coords)
 {
   const int level = s->getTechLayer()->getRoutingLevel();
 
@@ -1578,7 +1596,7 @@ void extMain::addObsShapesOnPlanes(dbInst* inst,
                                    const bool swap_coords)
 {
   dbInstShapeItr obs_shapes;
-  dbShape s;
+  odb::dbShape s;
 
   for (obs_shapes.begin(inst, dbInstShapeItr::OBSTRUCTIONS);
        obs_shapes.next(s);) {

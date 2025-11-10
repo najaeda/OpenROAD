@@ -1,10 +1,20 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2024-2025, The OpenROAD Authors
 
+#include <string.h>
+
+#include <cctype>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <list>
 #include <map>
 #include <string>
 #include <vector>
 
+#include "odb/array1.h"
+#include "odb/util.h"
 #include "parse.h"
 #include "rcx/extRCap.h"
 #include "rcx/extprocess.h"
@@ -12,10 +22,11 @@
 #include "utl/Logger.h"
 
 // #define SKIP_SOLVER
-namespace rcx {
 
-using namespace odb;
+using odb::Ath__array1D;
 using utl::RCX;
+
+namespace rcx {
 
 uint extMain::readProcess(const char* name, const char* filename)
 {
@@ -170,7 +181,7 @@ uint extRCModel::readRCvalues(const char* corner,
 
   uint corner_index = 0;
   extMetRCTable* met_rc = getMetRCTable(corner_index);
-  AthPool<extDistRC>* rcPool = met_rc->getRCPool();
+  odb::AthPool<extDistRC>* rcPool = met_rc->getRCPool();
 
   extMeasure m(nullptr);
   m._diagModel = 1;

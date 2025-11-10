@@ -2,6 +2,8 @@ or_integration_tests(
   "odb"
   TESTS
     abstract_origin
+    all_pins_placed1
+    all_pins_placed2
     bterm_hier_create
     check_routing_tracks
     create_blockage
@@ -33,6 +35,8 @@ or_integration_tests(
     ndr
     polygon
     read_abstract_lef
+    read_3dbv
+    read_3dbx
     read_db
     read_def
     read_def58
@@ -43,12 +47,15 @@ or_integration_tests(
     replace_hier_mod3
     replace_hier_mod4
     replace_hier_mod5
+    replace_hier_mod6
+    replace_hier_mod_report_checks
     rounding
     row_settings
     sky130hd_multi_patterned
     smash_vias
     transform
     wire_encoder
+    write_cdl
     write_def58
     write_def58_gzip
     write_lef_and_def

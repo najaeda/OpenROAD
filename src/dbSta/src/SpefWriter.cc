@@ -3,15 +3,19 @@
 
 #include "db_sta/SpefWriter.hh"
 
+#include <algorithm>
 #include <cstddef>
-#include <fstream>
 #include <iostream>
 #include <map>
 #include <memory>
 #include <string>
 
 #include "db_sta/dbNetwork.hh"
+#include "db_sta/dbSta.hh"
+#include "odb/db.h"
+#include "odb/dbTypes.h"
 #include "sta/Corner.hh"
+#include "sta/NetworkClass.hh"
 #include "sta/Parasitics.hh"
 #include "sta/Units.hh"
 #include "utl/Logger.h"
@@ -40,11 +44,6 @@ std::string escapeSpecial(const std::string& name)
   size_t pos = 0;
   while ((pos = result.find('$', pos)) != std::string::npos) {
     result.replace(pos, 1, "\\$");
-    pos += 2;
-  }
-  pos = 0;
-  while ((pos = result.find('/', pos)) != std::string::npos) {
-    result.replace(pos, 1, "\\/");
     pos += 2;
   }
   return result;

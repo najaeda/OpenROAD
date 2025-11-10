@@ -3,27 +3,10 @@
 
 #pragma once
 
-#include <tcl.h>
-
-namespace odb {
-class dbDatabase;
-}
-
-namespace utl {
-class Logger;
-}
+#include "tcl.h"
 
 namespace ppl {
 
-class IOPlacer;
-
-ppl::IOPlacer* makeIoplacer();
-
-void initIoplacer(ppl::IOPlacer* placer,
-                  odb::dbDatabase* db,
-                  utl::Logger* logger,
-                  Tcl_Interp* tcl_interp);
-
-void deleteIoplacer(ppl::IOPlacer* ioplacer);
+void initIoplacer(Tcl_Interp* tcl_interp);
 
 }  // namespace ppl

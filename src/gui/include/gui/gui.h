@@ -23,6 +23,8 @@
 #include <vector>
 
 #include "odb/db.h"
+#include "odb/dbObject.h"
+#include "odb/geom.h"
 
 struct Tcl_Interp;
 struct GifWriter;
@@ -543,7 +545,11 @@ class Renderer
                          T& value)
   {
     if (settings.count(key) == 1) {
-      value = std::get<T>(settings.at(key));
+      try {
+        value = std::get<T>(settings.at(key));
+      } catch (const std::bad_variant_access&) {
+        // Stay with current value
+      }
     }
   }
 
@@ -591,6 +597,7 @@ class Chart
   virtual void setYAxisMin(const std::vector<std::optional<double>>& mins) = 0;
   // One y per series.  The order matches y_labels in addChart
   virtual void addPoint(double x, const std::vector<double>& ys) = 0;
+  virtual void clearPoints() = 0;
 
   virtual void addVerticalMarker(double x, const Painter::Color& color) = 0;
 
@@ -631,6 +638,9 @@ class Gui
 
   // Add an instance to the selection set
   void addSelectedInst(const char* name);
+
+  // Return the selected set
+  const SelectionSet& selection();
 
   // check if any object(inst/net) is present in sect/highlight set
   bool anyObjectInSet(bool selection_set, odb::dbObjectType obj_type) const;
@@ -939,8 +949,6 @@ class Gui
 
   std::unique_ptr<GIF> gif_;
   static constexpr int kDefaultGifDelay = 250;
-
-  static Gui* singleton_;
 
   std::string main_window_title_ = "OpenROAD";
 };

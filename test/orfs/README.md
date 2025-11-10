@@ -9,6 +9,12 @@ A set of ORFS integration tests that runs in a few minutes suitable for inclusio
 1. Run `bazelisk run //test/orfs/gcd:gcd_update` to update RULES_JSON file for a design. This will build and run OpenROAD to generate a new RULES_JSON file and update the RULES_JSON source file.
 2. Create commit for RULES_JSON file
 
+## Updating all RULES_JSON files
+
+Oneliner that runs tests, which builds all prerequisites in parallel, then update all the rules:
+
+    bazelisk test test/orfs/... && bazelisk query test/orfs/... | grep _update\$ | xargs -n1 bazelisk run
+
 ## Updating ORFS and bazel-orfs
 
 `bazelisk run @bazel-orfs//:bump`, will find the latest bazel-orfs and ORFS docker image and update MODULE.bazel and MODULE.bazel.lock.
@@ -94,3 +100,15 @@ This is a bit more verbose, but eliminates any concerns about what the `/tmp/pla
     [INFO GPL-1013] Final placement area: 94.65 (+0.00%)
     [ERROR GPL-0305] RePlAce diverged during gradient descent calculation, resulting in an invalid step length (Inf or NaN). This is often caused by numerical instability or high placement density. Consider reducing placement density to potentially resolve the issue.
     Error: global_place_skip_io.tcl, 12 GPL-0305
+
+## Adding `tags = ["manual"]` and `test_kwargs = ["orfs"]` to BUILD files
+
+In OpenROAD, `bazelisk build ...` should not build ORFS targets, only OpenROAD binaries.
+
+Since bazel-orfs also has build targets, builds in Bazel can build anything, not just executables, the policy in OpenROAD is to mark non-binary build targets as `tags = ["manual"]`.
+
+To hunt down missing `tags = ["manual"]` run a query like:
+
+    bazelisk query 'kind(".*", //test/orfs/mock-array/...) except attr(tags, "manual", //test/orfs/mock-array/...)'
+
+Note that OpenROAD *does* want `bazelisk test ...` to run all tests, so test targets should be marked `tags = ["orfs"]` instead, so that `.bazelrc` can skip builds of those targets with the `build --build_tag_filters=-orfs` line.

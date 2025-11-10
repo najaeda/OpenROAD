@@ -29,10 +29,14 @@
 
 #include "lefiMacro.hpp"
 
+#include <string.h>
+
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
 #include "lefiDebug.hpp"
+#include "lefiKRDefs.hpp"
 #include "lefiMisc.hpp"
 #include "lefiUtil.hpp"
 #include "lefrSettings.hpp"

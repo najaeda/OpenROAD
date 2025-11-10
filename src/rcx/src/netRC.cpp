@@ -1,16 +1,29 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2019-2025, The OpenROAD Authors
 
+#include <string.h>
+
 #include <algorithm>
-#include <limits>
-#include <map>
+#include <cassert>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <list>
 #include <string>
 #include <vector>
 
 #include "find_some_net.h"
+#include "odb/array1.h"
+#include "odb/db.h"
+#include "odb/dbSet.h"
+#include "odb/dbShape.h"
+#include "odb/dbTypes.h"
+#include "odb/geom.h"
 #include "parse.h"
 #include "rcx/extRCap.h"
 #include "rcx/extSpef.h"
+#include "rcx/extViaModel.h"
 #include "rcx/grids.h"
 #include "utl/Logger.h"
 
@@ -19,8 +32,8 @@ namespace rcx {
 #ifdef DEBUG_NET_ID
 FILE* fp;
 #endif
-using namespace odb;
 
+using odb::Ath__array1D;
 using odb::dbBlock;
 using odb::dbBox;
 using odb::dbBTerm;

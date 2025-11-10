@@ -17,9 +17,13 @@
 #include "dbTable.hpp"
 #include "odb/db.h"
 // User Code Begin Includes
+#include <cassert>
 #include <cstddef>
+#include <cstdlib>
+#include <cstring>
 #include <map>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -28,6 +32,7 @@
 #include "dbModuleModBTermItr.h"
 #include "dbModuleModInstItr.h"
 #include "dbModuleModNetItr.h"
+#include "odb/dbBlockCallBackObj.h"
 #include "utl/Logger.h"
 // User Code End Includes
 namespace odb {
@@ -127,6 +132,9 @@ _dbModule::~_dbModule()
   if (_name) {
     free((void*) _name);
   }
+  // User Code Begin Destructor
+  delete _port_iter;
+  // User Code End Destructor
 }
 
 ////////////////////////////////////////////////////////////////////
@@ -195,7 +203,7 @@ void dbModule::addInst(dbInst* inst)
   _dbInst* _inst = (_dbInst*) inst;
   _dbBlock* block = (_dbBlock*) module->getOwner();
 
-  if (_inst->_flags._physical_only) {
+  if (isTop() == false && _inst->_flags._physical_only) {
     _inst->getLogger()->error(
         utl::ODB,
         297,
@@ -279,7 +287,7 @@ void _dbModule::removeInst(dbInst* inst)
   _inst->_module_prev = 0;
 }
 
-dbSet<dbModInst> dbModule::getChildren()
+dbSet<dbModInst> dbModule::getChildren() const
 {
   _dbModule* module = (_dbModule*) this;
   _dbBlock* block = (_dbBlock*) module->getOwner();
@@ -305,7 +313,7 @@ dbModNet* dbModule::getModNet(const char* net_name)
   return nullptr;
 }
 
-dbSet<dbModInst> dbModule::getModInsts()
+dbSet<dbModInst> dbModule::getModInsts() const
 {
   _dbModule* module = (_dbModule*) this;
   _dbBlock* block = (_dbBlock*) module->getOwner();
@@ -332,7 +340,7 @@ dbSet<dbModBTerm> dbModule::getPorts()
 // The modbterms are the leaf level connections
 //"flat view"
 //
-dbSet<dbModBTerm> dbModule::getModBTerms()
+dbSet<dbModBTerm> dbModule::getModBTerms() const
 {
   _dbModule* module = (_dbModule*) this;
   _dbBlock* block = (_dbBlock*) module->getOwner();
@@ -346,7 +354,7 @@ dbModBTerm* dbModule::getModBTerm(uint id)
   return (dbModBTerm*) (block->_modbterm_tbl->getObject(id));
 }
 
-dbSet<dbInst> dbModule::getInsts()
+dbSet<dbInst> dbModule::getInsts() const
 {
   _dbModule* module = (_dbModule*) this;
   _dbBlock* block = (_dbBlock*) module->getOwner();
@@ -364,11 +372,22 @@ dbModule* dbModule::create(dbBlock* block, const char* name)
   _block->_module_hash.insert(module);
 
   if (_block->_journal) {
+    debugPrint(block->getImpl()->getLogger(),
+               utl::ODB,
+               "DB_ECO",
+               1,
+               "ECO: create dbModule {} at id {}",
+               module->_name,
+               module->getId());
     _block->_journal->beginAction(dbJournal::CREATE_OBJECT);
     _block->_journal->pushParam(dbModuleObj);
     _block->_journal->pushParam(module->_name);
     _block->_journal->pushParam(module->getId());
     _block->_journal->endAction();
+  }
+
+  for (dbBlockCallBackObj* cb : _block->_callbacks) {
+    cb->inDbModuleCreate((dbModule*) module);
   }
 
   return (dbModule*) module;
@@ -435,12 +454,23 @@ void dbModule::destroy(dbModule* module)
     modnet_itr = dbModNet::destroy(modnet_itr);
   }
 
+  for (auto cb : block->_callbacks) {
+    cb->inDbModuleDestroy(module);
+  }
+
   dbProperty::destroyProperties(_module);
 
   // Journal the deletion of the dbModule after its ports
   // and properties deleted, so that on restore we have
   // dbModule to hang objects on.
   if (block->_journal) {
+    debugPrint(block->getImpl()->getLogger(),
+               utl::ODB,
+               "DB_ECO",
+               1,
+               "ECO: delete dbModule {} at id {}",
+               module->getName(),
+               module->getId());
     block->_journal->beginAction(dbJournal::DELETE_OBJECT);
     block->_journal->pushParam(dbModuleObj);
     block->_journal->pushParam(module->getName());
@@ -503,14 +533,14 @@ std::vector<dbInst*> dbModule::getLeafInsts()
 dbModBTerm* dbModule::findModBTerm(const char* name)
 {
   std::string modbterm_name(name);
-  // TODO: use proper hierarchy limiter from _dbBlock->_hier_delimiter
-  size_t last_idx = modbterm_name.find_last_of('/');
+  const char hier_delimiter = getOwner()->getHierarchyDelimiter();
+  size_t last_idx = modbterm_name.find_last_of(hier_delimiter);
   if (last_idx != std::string::npos) {
     modbterm_name = modbterm_name.substr(last_idx + 1);
   }
   _dbModule* obj = (_dbModule*) this;
   _dbBlock* par = (_dbBlock*) obj->getOwner();
-  auto it = obj->_modbterm_hash.find(name);
+  auto it = obj->_modbterm_hash.find(modbterm_name);
   if (it != obj->_modbterm_hash.end()) {
     auto db_id = (*it).second;
     return (dbModBTerm*) par->_modbterm_tbl->getPtr(db_id);
@@ -564,6 +594,70 @@ dbModule* dbModule::makeUniqueDbModule(const char* cell_name,
     module = dbModule::create(block, full_name.c_str());
   } while (module == nullptr);
   return module;
+}
+
+// Check if two hierarchical modules are swappable.
+// Two modules must have identical number of ports and port names need to match.
+// Functional equivalence is not required.
+bool dbModule::canSwapWith(dbModule* new_module) const
+{
+  const _dbModule* module_impl = reinterpret_cast<const _dbModule*>(this);
+  const std::string old_module_name = getName();
+  const std::string new_module_name = new_module->getName();
+
+  // Check if module names differ
+  if (old_module_name == new_module_name) {
+    module_impl->getLogger()->warn(
+        utl::ODB,
+        470,
+        "The modules cannot be swapped because the new module name {} is "
+        "identical to the existing module name.",
+        new_module_name);
+    return false;
+  }
+
+  // Check if number of module ports match
+  dbSet<dbModBTerm> old_bterms = getModBTerms();
+  dbSet<dbModBTerm> new_bterms = new_module->getModBTerms();
+  if (old_bterms.size() != new_bterms.size()) {
+    module_impl->getLogger()->warn(
+        utl::ODB,
+        453,
+        "The modules cannot be swapped because module {} has {} ports but "
+        "module {} has {} ports.",
+        old_module_name,
+        old_bterms.size(),
+        new_module_name,
+        new_bterms.size());
+    return false;
+  }
+
+  // Check if module port names match
+  for (dbModBTerm* old_bterm : old_bterms) {
+    if (new_module->findModBTerm(old_bterm->getName()) == nullptr) {
+      module_impl->getLogger()->warn(utl::ODB,
+                                     454,
+                                     "The modules cannot be swapped because "
+                                     "module {} has port {} which is "
+                                     "not in module {}.",
+                                     old_module_name,
+                                     old_bterm->getName(),
+                                     new_module_name);
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool dbModule::isTop() const
+{
+  const _dbModule* obj = reinterpret_cast<const _dbModule*>(this);
+  const dbBlock* block = static_cast<dbBlock*>(obj->getOwner());
+  if (block == nullptr) {
+    return false;
+  }
+  return (block->getTopModule() == this);
 }
 
 // Do a "deep" copy of old_module based on its instance context into new_module.
@@ -715,22 +809,27 @@ void _dbModule::copyModuleInsts(dbModule* old_module,
                                 dbModInst* new_mod_inst,
                                 ITMap& it_map)
 {
+  dbBlock* block = new_module->getOwner();
+  const char hier_delimiter = block->getHierarchyDelimiter();
   utl::Logger* logger = old_module->getImpl()->getLogger();
+
+  // Create a net name map (key: new net name, value: new dbNet*).
+  std::map<std::string, dbNet*> new_net_name_map;
+
   // Add insts to new module
   for (dbInst* old_inst : old_module->getInsts()) {
-    // Change unique instance name from old_inst/leaf to new_inst/leaf
+    // Decide an instance name.
+    // - Note that new_mod_inst can be null when the corresponding dbModule is
+    //   not instantiated.
     std::string new_inst_name;
     if (new_mod_inst) {
-      new_inst_name = new_mod_inst->getName();
-      new_inst_name += '/';
+      new_inst_name = new_mod_inst->getHierarchicalName();
+      new_inst_name += hier_delimiter;
     }
-    std::string old_inst_name = old_inst->getName();
-    // TODO: use proper hierarchy limiter from _dbBlock->_hier_delimiter
-    size_t first_idx = old_inst_name.find_first_of('/');
-    new_inst_name += (first_idx != std::string::npos)
-                         ? std::move(old_inst_name).substr(first_idx + 1)
-                         : std::move(old_inst_name);
 
+    new_inst_name += block->getBaseName(old_inst->getConstName());
+
+    // Create an instance of the same master
     dbInst* new_inst = dbInst::makeUniqueDbInst(new_module->getOwner(),
                                                 old_inst->getMaster(),
                                                 new_inst_name.c_str(),
@@ -741,11 +840,15 @@ void _dbModule::copyModuleInsts(dbModule* old_module,
                  utl::ODB,
                  "replace_design",
                  1,
-                 "Created module instance {}",
-                 new_inst->getName());
+                 "Created module instance '{}' with master '{}'",
+                 new_inst->getName(),
+                 old_inst->getMaster()->getName());
     } else {
-      logger->error(
-          utl::ODB, 459, "Module instance {} cannot be created", new_inst_name);
+      logger->error(utl::ODB,
+                    13,
+                    "Module instance '{}' with master '{}' cannot be created",
+                    new_inst_name,
+                    old_inst->getMaster()->getName());
     }
 
     // Map old iterms to new iterms and connect iterms that are local to this
@@ -769,41 +872,74 @@ void _dbModule::copyModuleInsts(dbModule* old_module,
                  old_iterm->getName(),
                  new_iterm->getName());
       dbNet* old_net = old_iterm->getNet();
-      if (old_net) {
-        // Create a local net only if it connects to iterms inside this module
-        std::string new_net_name;
-        if (new_mod_inst) {
-          new_net_name = new_mod_inst->getName();
-          new_net_name += '/';
-        }
-        std::string old_net_name = old_net->getName();
-        // TODO: use proper hierarchy limiter from _dbBlock->_hier_delimiter
-        size_t first_idx = old_net_name.find_first_of('/');
-        new_net_name += (first_idx != std::string::npos)
-                            ? std::move(old_net_name).substr(first_idx + 1)
-                            : std::move(old_net_name);
+      if (old_net == nullptr) {
+        continue;
+      }
 
-        dbNet* new_net = new_module->getOwner()->findNet(new_net_name.c_str());
-        if (new_net) {
-          new_iterm->connect(new_net);
-          debugPrint(logger,
-                     utl::ODB,
-                     "replace_design",
-                     1,
-                     "  connected iterm {} to existing local net {}",
-                     new_iterm->getName(),
-                     new_net->getName());
-        } else {
-          new_net = dbNet::create(new_module->getOwner(), new_net_name.c_str());
-          new_iterm->connect(new_net);
-          debugPrint(logger,
-                     utl::ODB,
-                     "replace_design",
-                     1,
-                     "  Connected iterm {} to new local net {}",
-                     new_iterm->getName(),
-                     new_net->getName());
-        }
+      //
+      // Create a local net only if it connects to iterms inside this module
+      //
+      std::string new_net_name;
+      if (new_mod_inst) {
+        new_net_name = new_mod_inst->getHierarchicalName();
+        new_net_name += hier_delimiter;
+      }
+
+      // Check if the flat net is an internal net within old_module
+      // - If old_module is uninstantiated module, every net in the module is
+      //   an internal net.
+      //   e.g., No module instance.
+      //         net_name = "_001_"     <-- Internal net.
+      //
+      // - Otherwise, an internal net should have the hierarchy prefix
+      //   (= module instance hierarchical name).
+      //   e.g., modinst_name = "u0/alu0"
+      //         net_name = u0/alu0/_001_   <-- Internal net.
+      //         net_name = u0/_001_        <-- External net crossing module
+      //                                        boundary.
+      std::string old_net_name = old_net->getName();
+      if (old_net->isInternalTo(old_module) == false) {
+        // Skip external net crossing module boundary.
+        // It will be connected later.
+        debugPrint(logger,
+                   utl::ODB,
+                   "replace_design",
+                   3,
+                   "    Skip: non-internal dbNet '{}' of old_module '{}'.\n",
+                   old_net_name,
+                   old_module->getHierarchicalName());
+        continue;
+      }
+
+      new_net_name += block->getBaseName(old_net_name.c_str());
+      auto it = new_net_name_map.find(new_net_name);
+      if (it != new_net_name_map.end()) {
+        // Connect to an existing local net
+        dbNet* new_net = (*it).second;
+        new_iterm->connect(new_net);
+        debugPrint(logger,
+                   utl::ODB,
+                   "replace_design",
+                   1,
+                   "  connected iterm '{}' to existing local net '{}'",
+                   new_iterm->getName(),
+                   new_net->getName());
+      } else {
+        // Create and connect to a new local net
+        assert(block->findNet(new_net_name.c_str()) == nullptr);
+        dbNet* new_net
+            = dbNet::create(new_module->getOwner(), new_net_name.c_str());
+        new_iterm->connect(new_net);
+        debugPrint(logger,
+                   utl::ODB,
+                   "replace_design",
+                   1,
+                   "  Connected iterm '{}' to new local net '{}'",
+                   new_iterm->getName(),
+                   new_net->getName());
+
+        // Insert it to the map
+        new_net_name_map[new_net_name] = new_net;
       }
     }
   }
@@ -829,7 +965,7 @@ void _dbModule::copyModuleModNets(dbModule* old_module,
              it_map.size());
   // Make boundary port connections.
   for (dbModNet* old_net : old_module->getModNets()) {
-    dbModNet* new_net = dbModNet::create(new_module, old_net->getName());
+    dbModNet* new_net = dbModNet::create(new_module, old_net->getConstName());
     if (new_net) {
       debugPrint(logger,
                  utl::ODB,
@@ -966,7 +1102,7 @@ bool _dbModule::copyToChildBlock(dbModule* module)
   std::string block_name = module->getName();
   dbTech* tech = top_block->getTech();
   // TODO: strip out instance name from block name
-  dbBlock* child_block = dbBlock::create(top_block, block_name.c_str(), tech);
+  dbBlock* child_block = dbBlock::create(top_block, block_name.c_str());
   if (child_block) {
     child_block->setDefUnits(tech->getLefUnits());
     child_block->setBusDelimiters('[', ']');
@@ -987,6 +1123,37 @@ bool _dbModule::copyToChildBlock(dbModule* module)
     copyModuleModNets(module, new_module, mod_bt_map, it_map);
   }
   return true;
+}
+
+bool dbModule::containsDbInst(dbInst* inst) const
+{
+  // Check direct child dbInsts
+  for (dbInst* child_inst : getInsts()) {
+    if (child_inst == inst) {
+      return true;
+    }
+  }
+
+  // Recursively check child dbModInsts
+  for (dbModInst* child_mod_inst : getChildren()) {
+    if (child_mod_inst->containsDbInst(inst)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool dbModule::containsDbModInst(dbModInst* inst) const
+{
+  // Recursively check child dbModInsts
+  for (dbModInst* child_mod_inst : getModInsts()) {
+    if (child_mod_inst == inst || child_mod_inst->containsDbModInst(inst)) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 // User Code End dbModulePublicMethods

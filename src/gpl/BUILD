@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # Copyright (c) 2025, The OpenROAD Authors
 
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("//bazel:python_wrap_cc.bzl", "python_wrap_cc")
 load("//bazel:tcl_encode_or.bzl", "tcl_encode")
 load("//bazel:tcl_wrap_cc.bzl", "tcl_wrap_cc")
 
@@ -12,17 +14,18 @@ package(
 cc_library(
     name = "gpl",
     srcs = [
+        "src/AbstractGraphics.cpp",
         "src/MakeReplace.cpp",
         "src/fft.cpp",
         "src/fft.h",
         "src/fftsg.cpp",
         "src/fftsg2d.cpp",
-        "src/graphics.cpp",
-        "src/graphics.h",
+        "src/graphicsImpl.cpp",
+        "src/graphicsImpl.h",
+        "src/graphicsNone.cpp",
         "src/initialPlace.cpp",
         "src/initialPlace.h",
         "src/mbff.cpp",
-        "src/mbff.h",
         "src/nesterovBase.cpp",
         "src/nesterovBase.h",
         "src/nesterovPlace.cpp",
@@ -41,8 +44,11 @@ cc_library(
         ":tcl",
     ],
     hdrs = [
+        "include/gpl/AbstractGraphics.h",
         "include/gpl/MakeReplace.h",
         "include/gpl/Replace.h",
+        "src/graphicsNone.h",
+        "src/mbff.h",
     ],
     copts = [
         "-fopenmp",
@@ -53,8 +59,8 @@ cc_library(
     deps = [
         "//:ord",
         "//src/dbSta",
+        "//src/dbSta:dbNetwork",
         "//src/grt",
-        "//src/grt:types",
         "//src/gui",
         "//src/odb",
         "//src/rsz",
@@ -101,4 +107,20 @@ tcl_wrap_cc(
     deps = [
         "//src/odb:swig",
     ],
+)
+
+python_wrap_cc(
+    name = "swig-py",
+    srcs = [
+        "include/gpl/Replace.h",
+        "src/replace-py.i",
+        "//:error_swig-py",
+    ],
+    module = "gpl",
+    root_swig_src = "src/replace-py.i",
+    swig_includes = [
+        "include",
+        "src",
+    ],
+    visibility = ["//:__subpackages__"],
 )

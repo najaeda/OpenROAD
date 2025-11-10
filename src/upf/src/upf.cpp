@@ -13,8 +13,11 @@
 
 #include "db_sta/dbNetwork.hh"
 #include "db_sta/dbSta.hh"
+#include "odb/db.h"
+#include "odb/geom.h"
 #include "sta/FuncExpr.hh"
 #include "sta/Liberty.hh"
+#include "utl/Logger.h"
 #include "writer.h"
 
 namespace upf {

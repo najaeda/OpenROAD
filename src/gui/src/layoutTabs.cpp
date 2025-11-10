@@ -3,12 +3,18 @@
 
 #include "layoutTabs.h"
 
+#include <QColor>
+#include <QWidget>
 #include <functional>
+#include <memory>
+#include <string>
 #include <utility>
 #include <vector>
 
 #include "colorGenerator.h"
 #include "layoutViewer.h"
+#include "odb/db.h"
+#include "odb/geom.h"
 #include "utl/Logger.h"
 
 namespace gui {
@@ -61,16 +67,16 @@ void LayoutTabs::updateBackgroundColor(LayoutViewer* viewer)
   viewer->setAutoFillBackground(true);
 }
 
-void LayoutTabs::blockLoaded(odb::dbBlock* block)
+void LayoutTabs::chipLoaded(odb::dbChip* chip)
 {
   // Check if we already have a tab for this block
   for (LayoutViewer* viewer : viewers_) {
-    if (viewer->getBlock() == block) {
+    if (viewer->getChip() == chip) {
       return;
     }
   }
 
-  populateModuleColors(block);
+  populateModuleColors(chip->getBlock());
   auto viewer = new LayoutViewer(options_,
                                  output_widget_,
                                  selected_,
@@ -93,10 +99,11 @@ void LayoutTabs::blockLoaded(odb::dbBlock* block)
   }
   auto scroll = new LayoutScroll(
       viewer, default_mouse_wheel_zoom_, arrow_keys_scroll_step_, this);
-  viewer->blockLoaded(block);
+  viewer->chipLoaded(chip);
 
-  auto tech = block->getTech();
-  const auto name = fmt::format("{} ({})", block->getName(), tech->getName());
+  auto tech = chip->getTech();
+  const auto name
+      = fmt::format("{} ({})", chip->getName(), tech ? tech->getName() : "-");
   addTab(scroll, name.c_str());
 
   updateBackgroundColor(viewer);
@@ -125,7 +132,7 @@ void LayoutTabs::tabChange(int index)
 {
   current_viewer_ = viewers_[index];
 
-  emit setCurrentBlock(current_viewer_->getBlock());
+  emit setCurrentChip(current_viewer_->getChip());
 }
 
 void LayoutTabs::setLogger(utl::Logger* logger)

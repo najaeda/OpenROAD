@@ -4,12 +4,15 @@
 #pragma once
 
 #include <QObject>
-#include <boost/geometry.hpp>
-#include <boost/geometry/index/rtree.hpp>
+#include <atomic>
+#include <map>
 #include <mutex>
+#include <tuple>
 #include <utility>
 #include <vector>
 
+#include "boost/geometry/geometry.hpp"
+#include "boost/geometry/index/rtree.hpp"
 #include "odb/db.h"
 #include "odb/dbBlockCallBackObj.h"
 #include "odb/geom.h"
@@ -39,13 +42,20 @@ class Search : public QObject, public odb::dbBlockCallBackObj
   class PolygonIntersectPredicate;
 
  public:
+  enum RouteBoxType
+  {
+    WIRE,
+    VIA,
+    BTERM
+  };
+
   template <typename T>
   using LayerMap = std::map<odb::dbTechLayer*, T>;
 
   template <typename T>
   using RectValue = std::pair<odb::Rect, T>;
   template <typename T>
-  using RouteBoxValue = std::tuple<odb::Rect, bool, T>;
+  using RouteBoxValue = std::tuple<odb::Rect, RouteBoxType, T>;
   template <typename T>
   using SNetValue = std::tuple<odb::dbSBox*, odb::Polygon, T>;
   template <typename T>
@@ -123,8 +133,8 @@ class Search : public QObject, public odb::dbBlockCallBackObj
 
   ~Search() override;
 
-  // Build the structure for the given block.
-  void setTopBlock(odb::dbBlock* block);
+  // Build the structure for the given chip.
+  void setTopChip(odb::dbChip* chip);
 
   // Find all box shapes in the given bounds on the given layer which
   // are at least min_size in either dimension.
@@ -225,6 +235,7 @@ class Search : public QObject, public odb::dbBlockCallBackObj
   void inDbSWireAddSBox(odb::dbSBox* box) override;
   void inDbSWireRemoveSBox(odb::dbSBox* box) override;
   void inDbBlockSetDieArea(odb::dbBlock* block) override;
+  void inDbBlockSetCoreArea(odb::dbBlock* block) override;
   void inDbBlockageCreate(odb::dbBlockage* blockage) override;
   void inDbBlockageDestroy(odb::dbBlockage* blockage) override;
   void inDbObstructionCreate(odb::dbObstruction* obs) override;
@@ -237,7 +248,7 @@ class Search : public QObject, public odb::dbBlockCallBackObj
 
  signals:
   void modified();
-  void newBlock(odb::dbBlock* block);
+  void newChip(odb::dbChip* chip);
 
  private:
   struct BlockData;
@@ -265,7 +276,7 @@ class Search : public QObject, public odb::dbBlockCallBackObj
   void announceModified(std::atomic_bool& flag);
   BlockData& getData(odb::dbBlock* block);
 
-  odb::dbBlock* top_block_{nullptr};
+  odb::dbChip* top_chip_{nullptr};
 
   struct BlockData
   {

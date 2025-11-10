@@ -29,11 +29,13 @@
 
 #include "defiRowTrack.hpp"
 
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <sstream>
 
 #include "defiDebug.hpp"
+#include "defiKRDefs.hpp"
 #include "defiUtil.hpp"
 #include "defrData.hpp"
 

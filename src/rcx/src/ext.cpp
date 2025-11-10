@@ -3,9 +3,12 @@
 
 #include "rcx/ext.h"
 
-#include <functional>
+#include <cstdio>
+#include <list>
 #include <string>
 
+#include "odb/db.h"
+#include "odb/dbObject.h"
 #include "odb/wOrder.h"
 #include "parse.h"
 #include "rcx/extMeasureRC.h"
@@ -18,22 +21,15 @@ using utl::Logger;
 using utl::RCX;
 
 // Ext::Ext() : _ext(std::make_unique<extMain>())
-Ext::Ext()
+Ext::Ext(odb::dbDatabase* db, Logger* logger, const char* spef_version)
+    : _db(db), _ext(new extMain()), logger_(logger), spef_version_(spef_version)
 {
-  _ext = new extMain();
+  _ext->init(db, logger);
 }
 
 Ext::~Ext()
 {
   delete _ext;
-}
-
-void Ext::init(odb::dbDatabase* db, Logger* logger, const char* spef_version)
-{
-  _db = db;
-  logger_ = logger;
-  spef_version_ = spef_version;
-  _ext->init(db, logger);
 }
 
 void Ext::setLogger(Logger* logger)
@@ -502,7 +498,7 @@ bool Ext::rc_estimate(const std::string& ext_model_file,
     cornerTable[ii] = ii;
   }
 
-  dbTech* tech = _db->getTech();
+  odb::dbTech* tech = _db->getTech();
 
   int dbunit = tech->getDbUnitsPerMicron();
   double dbFactor = 1;

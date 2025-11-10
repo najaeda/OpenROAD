@@ -3,15 +3,18 @@
 
 #include "dbTechLayerSpacingRule.h"
 
-#include <spdlog/fmt/ostr.h>
+#include <cassert>
 
+#include "dbCore.h"
 #include "dbDatabase.h"
 #include "dbTable.h"
 #include "dbTable.hpp"
 #include "dbTech.h"
 #include "dbTechLayer.h"
+#include "odb/ZException.h"
 #include "odb/db.h"
 #include "odb/lefout.h"
+#include "spdlog/fmt/ostr.h"
 
 namespace odb {
 

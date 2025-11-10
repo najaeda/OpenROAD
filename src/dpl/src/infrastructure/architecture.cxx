@@ -6,16 +6,14 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
-#include <iostream>
 #include <limits>
-#include <map>
 #include <stack>
-#include <string>
 #include <utility>
 #include <vector>
 
 #include "Objects.h"
 #include "Padding.h"
+#include "infrastructure/Coordinates.h"
 #include "network.h"
 #include "odb/db.h"
 #include "odb/dbTransform.h"

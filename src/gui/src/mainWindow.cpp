@@ -3,7 +3,21 @@
 
 #include "mainWindow.h"
 
+#include <QApplication>
 #include <QDesktopServices>
+#include <QDialog>
+#include <QPushButton>
+#include <QSize>
+#include <QWidget>
+#include <algorithm>
+#include <any>
+#include <exception>
+#include <limits>
+#include <memory>
+#include <optional>
+#include <set>
+#include <variant>
+#include <vector>
 #if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
 #include <QDesktopWidget>
 #endif
@@ -19,12 +33,8 @@
 #include <QUrl>
 #include <QWidgetAction>
 #include <cmath>
-#include <iomanip>
-#include <map>
-#include <sstream>
 #include <string>
 #include <utility>
-#include <vector>
 
 #include "GUIProgress.h"
 #include "browserWidget.h"
@@ -35,15 +45,19 @@
 #include "displayControls.h"
 #include "drcWidget.h"
 #include "globalConnectDialog.h"
+#include "gui/gui.h"
 #include "gui/heatMap.h"
 #include "helpWidget.h"
 #include "highlightGroupDialog.h"
 #include "inspector.h"
 #include "layoutTabs.h"
 #include "layoutViewer.h"
+#include "odb/db.h"
+#include "odb/dbObject.h"
 #include "scriptWidget.h"
 #include "selectHighlightWindow.h"
 #include "sta/Liberty.hh"
+#include "sta/NetworkClass.hh"
 #include "staDescriptors.h"
 #include "staGui.h"
 #include "timingWidget.h"
@@ -125,9 +139,9 @@ MainWindow::MainWindow(bool load_settings, QWidget* parent)
 
   // Hook up all the signals/slots
   connect(viewers_,
-          &LayoutTabs::setCurrentBlock,
+          &LayoutTabs::setCurrentChip,
           controls_,
-          &DisplayControls::setCurrentBlock);
+          &DisplayControls::setCurrentChip);
   connect(script_, &ScriptWidget::exiting, this, &MainWindow::exit);
   connect(script_,
           &ScriptWidget::commandExecuted,
@@ -137,7 +151,7 @@ MainWindow::MainWindow(bool load_settings, QWidget* parent)
           &ScriptWidget::commandAboutToExecute,
           viewers_,
           &LayoutTabs::commandAboutToExecute);
-  connect(this, &MainWindow::blockLoaded, viewers_, &LayoutTabs::blockLoaded);
+  connect(this, &MainWindow::chipLoaded, viewers_, &LayoutTabs::chipLoaded);
   connect(this, &MainWindow::redraw, viewers_, &LayoutTabs::fullRepaint);
   connect(
       this, &MainWindow::blockLoaded, controls_, &DisplayControls::blockLoaded);
@@ -351,27 +365,31 @@ MainWindow::MainWindow(bool load_settings, QWidget* parent)
   connect(this, &MainWindow::blockLoaded, drc_viewer_, &DRCWidget::setBlock);
   connect(
       this, &MainWindow::blockLoaded, clock_viewer_, &ClockWidget::setBlock);
-  connect(drc_viewer_, &DRCWidget::selectDRC, [this](const Selected& selected) {
-    setSelected(selected, false);
-    odb::Rect bbox;
-    selected.getBBox(bbox);
+  connect(drc_viewer_,
+          &DRCWidget::selectDRC,
+          [this](const Selected& selected, const bool open_inspector) {
+            if (open_inspector) {
+              setSelected(selected, false);
+            }
+            odb::Rect bbox;
+            selected.getBBox(bbox);
 
-    auto* block = getBlock();
-    int zoomout_dist = std::numeric_limits<int>::max();
-    if (block != nullptr) {
-      // 10 microns
-      zoomout_dist = 10 * block->getDbUnitsPerMicron();
-    }
-    // twice the largest dimension of bounding box
-    const int zoomout_box = 2 * std::max(bbox.dx(), bbox.dy());
-    // pick smallest
-    const int zoomout_margin = std::min(zoomout_dist, zoomout_box);
-    bbox.set_xlo(bbox.xMin() - zoomout_margin);
-    bbox.set_ylo(bbox.yMin() - zoomout_margin);
-    bbox.set_xhi(bbox.xMax() + zoomout_margin);
-    bbox.set_yhi(bbox.yMax() + zoomout_margin);
-    zoomTo(bbox);
-  });
+            auto* block = getBlock();
+            int zoomout_dist = std::numeric_limits<int>::max();
+            if (block != nullptr) {
+              // 10 microns
+              zoomout_dist = 10 * block->getDbUnitsPerMicron();
+            }
+            // twice the largest dimension of bounding box
+            const int zoomout_box = 2 * std::max(bbox.dx(), bbox.dy());
+            // pick smallest
+            const int zoomout_margin = std::min(zoomout_dist, zoomout_box);
+            bbox.set_xlo(bbox.xMin() - zoomout_margin);
+            bbox.set_ylo(bbox.yMin() - zoomout_margin);
+            bbox.set_xhi(bbox.xMax() + zoomout_margin);
+            bbox.set_yhi(bbox.yMax() + zoomout_margin);
+            zoomTo(bbox);
+          });
   connect(this, &MainWindow::selectionChanged, [this]() {
     if (!selected_.empty()) {
       drc_viewer_->updateSelection(*selected_.begin());
@@ -512,6 +530,11 @@ void MainWindow::updateTitle()
   }
 }
 
+const SelectionSet& MainWindow::selection()
+{
+  return selected_;
+}
+
 void MainWindow::setBlock(odb::dbBlock* block)
 {
   updateTitle();
@@ -601,6 +624,10 @@ void MainWindow::init(sta::dbSta* sta, const std::string& help_path)
   gui->registerDescriptor<odb::dbBox*>(new DbBoxDescriptor(db_));
   gui->registerDescriptor<DbBoxDescriptor::BoxWithTransform>(
       new DbBoxDescriptor(db_));
+  gui->registerDescriptor<odb::dbMasterEdgeType*>(
+      new DbMasterEdgeTypeDescriptor(db_));
+  gui->registerDescriptor<odb::dbCellEdgeSpacing*>(
+      new DbCellEdgeSpacingDescriptor(db_));
 
   gui->registerDescriptor<sta::Corner*>(new CornerDescriptor(sta));
   gui->registerDescriptor<sta::LibertyLibrary*>(
@@ -1605,7 +1632,13 @@ void MainWindow::postReadLef(odb::dbTech* tech, odb::dbLib* library)
 
 void MainWindow::postReadDef(odb::dbBlock* block)
 {
+  emit chipLoaded(block->getChip());
   emit blockLoaded(block);
+}
+
+void MainWindow::postRead3Dbx(odb::dbChip* chip)
+{
+  emit chipLoaded(chip);
 }
 
 void MainWindow::postReadDb(odb::dbDatabase* db)
@@ -1619,10 +1652,9 @@ void MainWindow::postReadDb(odb::dbDatabase* db)
     return;
   }
 
+  // Only create a tab for the top block
+  emit chipLoaded(block->getChip());
   emit blockLoaded(block);
-  for (auto child : block->getChildren()) {
-    emit blockLoaded(child);
-  }
 }
 
 void MainWindow::setLogger(utl::Logger* logger)
@@ -1638,6 +1670,7 @@ void MainWindow::setLogger(utl::Logger* logger)
   drc_viewer_->setLogger(logger);
   clock_viewer_->setLogger(logger);
   charts_widget_->setLogger(logger);
+  timing_widget_->setLogger(logger);
 }
 
 void MainWindow::fit()
@@ -1687,6 +1720,12 @@ void MainWindow::closeEvent(QCloseEvent* event)
   exit_check.exec();
 
   if (exit_check.clickedButton() == exit_button) {
+    // close all dialogs
+    for (QWidget* w : QApplication::topLevelWidgets()) {
+      if (w != this) {
+        w->close();
+      }
+    }
     // exit selected so go ahead and close
     event->accept();
   } else if (exit_check.clickedButton() == hide_button) {

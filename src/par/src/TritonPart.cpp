@@ -921,6 +921,8 @@ std::vector<int> TritonPart::PartitionKWaySimpleMode(
   placement_dimensions_ = 0;
   fence_flag_ = false;
   hyperedges_ = hyperedges;
+  vertex_weights_.clear();
+  hyperedge_weights_.clear();
   fixed_attr_.clear();
   community_attr_.clear();
   group_attr_.clear();
@@ -1569,7 +1571,8 @@ void TritonPart::BuildTimingPaths()
       // group_count, endpoint_count, unique_pins
       group_count,     // number of paths in total
       endpoint_count,  // number of paths for each endpoint
-      true,
+      true,            // unique pins
+      true,            // unique edges
       -sta::INF,
       sta::INF,  // slack_min, slack_max,
       true,      // sort_by_slack

@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2019-2025, The OpenROAD Authors
 
+#include <cstdio>
+#include <cstdlib>
+
+#include "odb/array1.h"
+#include "odb/db.h"
+#include "odb/dbSet.h"
 #include "rcx/dbUtil.h"
 #include "rcx/extMeasureRC.h"
 #include "rcx/extRCap.h"
@@ -13,10 +19,16 @@
 // #define CHECK_SAME_NET
 // #define MIN_FOR_LOOPS
 
-namespace rcx {
+using odb::Ath__array1D;
+using odb::dbCapNode;
+using odb::dbCCSeg;
+using odb::dbNet;
+using odb::dbRSeg;
+using odb::dbSet;
 
 using utl::RCX;
-using namespace odb;
+
+namespace rcx {
 
 void extMeasureRC::GetOUname(char buf[200], int met, int metOver, int metUnder)
 {

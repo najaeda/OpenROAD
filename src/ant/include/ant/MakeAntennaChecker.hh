@@ -3,27 +3,10 @@
 
 #pragma once
 
-#include <tcl.h>
-
-namespace odb {
-class dbDatabase;
-}
-
-namespace utl {
-class Logger;
-}
+#include "tcl.h"
 
 namespace ant {
 
-class AntennaChecker;
-
-AntennaChecker* makeAntennaChecker();
-
-void deleteAntennaChecker(ant::AntennaChecker* antennachecker);
-
-void initAntennaChecker(ant::AntennaChecker* antenna_checker,
-                        odb::dbDatabase* db,
-                        utl::Logger* logger,
-                        Tcl_Interp* tcl_interp);
+void initAntennaChecker(Tcl_Interp* tcl_interp);
 
 }  // namespace ant

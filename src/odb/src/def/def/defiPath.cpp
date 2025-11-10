@@ -29,10 +29,12 @@
 
 #include "defiPath.hpp"
 
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
 #include "defiDebug.hpp"
+#include "defiKRDefs.hpp"
 #include "defiUtil.hpp"
 #include "defrData.hpp"
 

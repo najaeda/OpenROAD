@@ -8,6 +8,10 @@
 #include "sta/StaState.hh"
 #include "utl/Logger.h"
 
+namespace est {
+class EstimateParasitics;
+}
+
 namespace rsz {
 
 class Resizer;
@@ -42,6 +46,7 @@ class RepairHold : public sta::dbStaState
                   // Max buffer count as percent of design instance count.
                   float max_buffer_percent,
                   int max_passes,
+                  int max_iterations,
                   bool verbose);
   void repairHold(const Pin* end_pin,
                   double setup_margin,
@@ -80,6 +85,7 @@ class RepairHold : public sta::dbStaState
                   bool allow_setup_violations,
                   int max_buffer_count,
                   int max_passes,
+                  int max_iterations,
                   bool verbose);
   void repairHoldPass(VertexSeq& hold_failures,
                       LibertyCell* buffer_cell,
@@ -108,6 +114,7 @@ class RepairHold : public sta::dbStaState
   Logger* logger_ = nullptr;
   dbNetwork* db_network_ = nullptr;
   Resizer* resizer_;
+  est::EstimateParasitics* estimate_parasitics_;
 
   int resize_count_ = 0;
   int inserted_buffer_count_ = 0;

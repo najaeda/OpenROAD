@@ -3,11 +3,13 @@
 
 #include "find_some_net.h"
 
+#include <cstdlib>
 #include <memory>
 #include <vector>
 
 #include "odb/db.h"
 #include "parse.h"
+#include "utl/Logger.h"
 
 namespace rcx {
 

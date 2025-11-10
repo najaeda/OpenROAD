@@ -2,11 +2,16 @@
 // Copyright (c) 2018-2025, The OpenROAD Authors
 
 #include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <map>
+#include <tuple>
 #include <vector>
 
 #include "AbstractFastRouteRenderer.h"
 #include "DataType.h"
 #include "FastRoute.h"
+#include "odb/geom.h"
 #include "utl/Logger.h"
 
 namespace grt {
@@ -112,6 +117,17 @@ void FastRouteCore::copyStTree(const int ind, const Tree& rsmt)
       logger_->error(GRT, 188, "Invalid number of node neighbors.");
     }
   }
+
+  // Map the node indices to the pin indices of the net
+  std::map<odb::Point, int> pos_count;
+  for (int i = 0; i < d; i++) {
+    odb::Point pos{treenodes[i].x, treenodes[i].y};
+    pos_count[pos]++;
+    const int pin_idx = nets_[ind]->getPinIdxFromPosition(
+        treenodes[i].x, treenodes[i].y, pos_count[pos]);
+    sttrees_[ind].node_to_pin_idx[i] = pin_idx;
+  }
+
   // Copy num neighbors
   for (int i = 0; i < numnodes; i++) {
     treenodes[i].nbr_count = nbrcnt[i];
@@ -720,9 +736,9 @@ void FastRouteCore::gen_brk_RSMT(const bool congestionDriven,
         // the position of this segment in seglist
         const int8_t cost = nets_[netID]->getEdgeCost();
         if (x1 < x2) {
-          seglist_[netID].emplace_back(x1, y1, x2, y2, cost);
+          seglist_[netID].emplace_back(netID, x1, y1, x2, y2, cost);
         } else {
-          seglist_[netID].emplace_back(x2, y2, x1, y1, cost);
+          seglist_[netID].emplace_back(netID, x2, y2, x1, y1, cost);
         }
       }
     }  // loop j

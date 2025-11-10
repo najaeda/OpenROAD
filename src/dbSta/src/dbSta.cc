@@ -9,10 +9,12 @@
 
 #include "db_sta/dbSta.hh"
 
-#include <tcl.h>
-
 #include <algorithm>  // min
+#include <cctype>
 #include <cmath>
+#include <cstdarg>
+#include <cstddef>
+#include <cstdint>
 #include <fstream>
 #include <map>
 #include <memory>
@@ -20,7 +22,6 @@
 #include <regex>
 #include <set>
 #include <string>
-#include <utility>
 #include <vector>
 
 #include "boost/json.hpp"
@@ -28,6 +29,7 @@
 #include "dbSdcNetwork.hh"
 #include "db_sta/dbNetwork.hh"
 #include "odb/db.h"
+#include "odb/dbTypes.h"
 #include "sta/Clock.hh"
 #include "sta/Delay.hh"
 #include "sta/EquivCells.hh"
@@ -39,6 +41,7 @@
 #include "sta/PatternMatch.hh"
 #include "sta/ReportTcl.hh"
 #include "sta/Sdc.hh"
+#include "sta/Sta.hh"
 #include "sta/StaMain.hh"
 #include "sta/Units.hh"
 #include "utl/Logger.h"
@@ -47,11 +50,6 @@
 ////////////////////////////////////////////////////////////////
 
 namespace sta {
-
-dbSta* makeDbSta()
-{
-  return new dbSta;
-}
 
 namespace {
 // Holds the usage information of a specific cell which includes (i) name of
@@ -152,6 +150,8 @@ class dbStaCbk : public dbBlockCallBackObj
   void setNetwork(dbNetwork* network);
   void inDbInstCreate(dbInst* inst) override;
   void inDbInstDestroy(dbInst* inst) override;
+  void inDbModuleCreate(dbModule* module) override;
+  void inDbModuleDestroy(dbModule* module) override;
   void inDbInstSwapMasterBefore(dbInst* inst, dbMaster* master) override;
   void inDbInstSwapMasterAfter(dbInst* inst) override;
   void inDbNetDestroy(dbNet* net) override;
@@ -192,7 +192,25 @@ dbStaState::~dbStaState()
 
 ////////////////////////////////////////////////////////////////
 
-dbSta::~dbSta() = default;
+namespace {
+std::once_flag init_sta_flag;
+}
+
+dbSta::dbSta(Tcl_Interp* tcl_interp, odb::dbDatabase* db, utl::Logger* logger)
+{
+  std::call_once(init_sta_flag, []() { sta::initSta(); });
+  initVars(tcl_interp, db, logger);
+  if (!sta::Sta::sta()) {
+    sta::Sta::setSta(this);
+  }
+}
+
+dbSta::~dbSta()
+{
+  if (sta::Sta::sta() == this) {
+    sta::Sta::setSta(nullptr);
+  }
+}
 
 void dbSta::initVars(Tcl_Interp* tcl_interp,
                      odb::dbDatabase* db,
@@ -231,8 +249,7 @@ void dbSta::unregisterStaState(dbStaState* state)
 
 std::unique_ptr<dbSta> dbSta::makeBlockSta(odb::dbBlock* block)
 {
-  auto clone = std::make_unique<dbSta>();
-  clone->initVars(tclInterp(), db_, logger_);
+  auto clone = std::make_unique<dbSta>(tclInterp(), db_, logger_);
   clone->getDbNetwork()->setBlock(block);
   clone->getDbNetwork()->setDefaultLibertyLibrary(
       network_->defaultLibertyLibrary());
@@ -268,11 +285,17 @@ void dbSta::postReadLef(dbTech* tech, dbLib* library)
 
 void dbSta::postReadDef(dbBlock* block)
 {
-  if (!block->getParent()) {
+  // If this is the top block of the main chip:
+  if (!block->getParent() && block->getChip() == block->getDb()->getChip()) {
     db_network_->readDefAfter(block);
     db_cbk_->addOwner(block);
     db_cbk_->setNetwork(db_network_);
   }
+}
+
+void dbSta::postRead3Dbx(odb::dbChip* chip)
+{
+  // TODO: we are not ready to do timing on chiplets yet
 }
 
 void dbSta::postReadDb(dbDatabase* db)
@@ -922,6 +945,16 @@ void dbStaCbk::inDbInstDestroy(dbInst* inst)
   // This is called after the iterms have been destroyed
   // so it side-steps Sta::deleteInstanceAfter.
   sta_->deleteLeafInstanceBefore(network_->dbToSta(inst));
+}
+
+void dbStaCbk::inDbModuleCreate(dbModule* module)
+{
+  network_->registerHierModule(network_->dbToSta(module));
+}
+
+void dbStaCbk::inDbModuleDestroy(dbModule* module)
+{
+  network_->unregisterHierModule(network_->dbToSta(module));
 }
 
 void dbStaCbk::inDbInstSwapMasterBefore(dbInst* inst, dbMaster* master)

@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # Copyright (c) 2025, The OpenROAD Authors
 
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("//bazel:python_wrap_cc.bzl", "python_wrap_cc")
 load("//bazel:tcl_encode_or.bzl", "tcl_encode")
 load("//bazel:tcl_wrap_cc.bzl", "tcl_wrap_cc")
 
@@ -78,6 +80,7 @@ cc_library(
         "src/db/tech/frViaDef.h",
         "src/db/tech/frViaRuleGenerate.h",
     ],
+    deps = ["@boost.polygon"],
 )
 
 cc_library(
@@ -95,7 +98,6 @@ cc_library(
         "src/db/drObj/drVia.cpp",
         "src/db/infra/KDTree.cpp",
         "src/db/infra/frTime.cpp",
-        "src/db/infra/frTime_helper.cpp",
         "src/db/obj/frAccess.cpp",
         "src/db/obj/frInst.cpp",
         "src/db/obj/frInstTerm.cpp",
@@ -192,16 +194,10 @@ cc_library(
         "src/ta/FlexTA_rq.cpp",
     ],
     hdrs = [
-        "include/triton_route/TritonRoute.h",
+        "include/drt/TritonRoute.h",
     ],
     copts = [
         "-Isrc/drt/src",
-        "-Isrc/drt/src/dr",
-        "-Isrc/drt/src/gc",
-        "-Isrc/drt/src/io",
-        "-Isrc/drt/src/pa",
-        "-Isrc/drt/src/rp",
-        "-Isrc/drt/src/ta",
         "-fopenmp",
     ],
     includes = [
@@ -229,7 +225,7 @@ cc_library(
 cc_library(
     name = "ui",
     srcs = [
-        "include/triton_route/TritonRoute.h",
+        "include/drt/TritonRoute.h",
         "src/AbstractGraphicsFactory.h",
         "src/GraphicsFactory.cpp",
         "src/GraphicsFactory.h",
@@ -260,7 +256,7 @@ cc_library(
         ":tcl",
     ],
     hdrs = [
-        "include/triton_route/MakeTritonRoute.h",
+        "include/drt/MakeTritonRoute.h",
     ],
     copts = [
         "-Isrc/drt/src",
@@ -310,5 +306,22 @@ tcl_wrap_cc(
     ],
     deps = [
         "//src/odb:swig",
+    ],
+)
+
+python_wrap_cc(
+    name = "swig-py",
+    srcs = [
+        "include/drt/TritonRoute.h",
+        "src/TritonRoute-py.i",
+        "//:error_swig-py",
+    ],
+    module = "drt_py",
+    root_swig_src = "src/TritonRoute-py.i",
+    swig_includes = [
+        "include",
+    ],
+    deps = [
+        "//src/odb:swig-py",
     ],
 )

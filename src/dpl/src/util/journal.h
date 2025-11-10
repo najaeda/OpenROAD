@@ -4,9 +4,11 @@
 #pragma once
 
 #include <cstddef>
+#include <memory>
 #include <set>
 #include <vector>
 
+#include "dpl/Opendp.h"
 #include "infrastructure/network.h"
 namespace dpl {
 class Grid;

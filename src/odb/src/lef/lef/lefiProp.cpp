@@ -29,10 +29,12 @@
 
 #include "lefiProp.hpp"
 
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
 #include "lefiDebug.hpp"
+#include "lefiKRDefs.hpp"
 #include "lex.h"
 
 BEGIN_LEF_PARSER_NAMESPACE

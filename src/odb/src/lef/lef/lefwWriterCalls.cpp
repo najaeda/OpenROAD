@@ -38,10 +38,12 @@
 
 #include "lefwWriterCalls.hpp"
 
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
 #include "lefiDebug.hpp"
+#include "lefiKRDefs.hpp"
 
 BEGIN_LEF_PARSER_NAMESPACE
 

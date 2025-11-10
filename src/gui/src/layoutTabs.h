@@ -3,13 +3,20 @@
 
 #pragma once
 
+#include <QColor>
 #include <QTabWidget>
+#include <QWidget>
 #include <functional>
+#include <map>
 #include <memory>
+#include <set>
+#include <string>
 #include <vector>
 
 #include "gui/gui.h"
 #include "layoutViewer.h"
+#include "odb/db.h"
+#include "odb/geom.h"
 
 namespace gui {
 
@@ -64,7 +71,7 @@ class LayoutTabs : public QTabWidget
   void clearNetTracks();
 
  signals:
-  void setCurrentBlock(odb::dbBlock* block);
+  void setCurrentChip(odb::dbChip* chip);
   void newViewer(LayoutViewer* viewer);
 
   // These are just forwarding from the LayoutViewer(s).  Only the
@@ -88,7 +95,7 @@ class LayoutTabs : public QTabWidget
   void zoomIn();
   void zoomOut();
   void zoomTo(const odb::Rect& rect_dbu);
-  void blockLoaded(odb::dbBlock* block);
+  void chipLoaded(odb::dbChip* chip);
   void fit();
   void fullRepaint();
   void startRulerBuild();

@@ -7,24 +7,35 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <cstring>
 #include <ctime>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <limits>
-#include <mutex>
+#include <set>
 #include <sstream>
+#include <string>
+#include <system_error>
+#include <utility>
 #include <vector>
 
+#include "annealing_strategy.h"
 #include "base/abc/abc.h"
 #include "base/main/abcapis.h"
+#include "cut/abc_init.h"
+#include "cut/abc_library_factory.h"
+#include "cut/blif.h"
 #include "db_sta/dbNetwork.hh"
 #include "db_sta/dbSta.hh"
 #include "odb/db.h"
-#include "ord/OpenRoad.hh"
-#include "rmp/blif.h"
+#include "rsz/Resizer.hh"
+#include "sta/Delay.hh"
 #include "sta/Graph.hh"
 #include "sta/Liberty.hh"
 #include "sta/Network.hh"
+#include "sta/NetworkClass.hh"
+#include "sta/Path.hh"
 #include "sta/PathEnd.hh"
 #include "sta/PathExpanded.hh"
 #include "sta/PatternMatch.hh"
@@ -37,22 +48,23 @@
 
 using utl::RMP;
 using namespace abc;
+using cut::Blif;
 
 namespace rmp {
 
-std::once_flag init_abc_flag;
-
-void Restructure::init(utl::Logger* logger,
-                       sta::dbSta* open_sta,
-                       odb::dbDatabase* db,
-                       rsz::Resizer* resizer)
+Restructure::Restructure(utl::Logger* logger,
+                         sta::dbSta* open_sta,
+                         odb::dbDatabase* db,
+                         rsz::Resizer* resizer,
+                         est::EstimateParasitics* estimate_parasitics)
 {
   logger_ = logger;
   db_ = db;
   open_sta_ = open_sta;
   resizer_ = resizer;
+  estimate_parasitics_ = estimate_parasitics;
 
-  std::call_once(init_abc_flag, []() { abc::Abc_Start(); });
+  cut::abcInit();
 }
 
 void Restructure::deleteComponents()
@@ -73,7 +85,21 @@ void Restructure::reset()
 void Restructure::resynth(sta::Corner* corner)
 {
   ZeroSlackStrategy zero_slack_strategy(corner);
-  zero_slack_strategy.OptimizeDesign(open_sta_, name_generator_, logger_);
+  zero_slack_strategy.OptimizeDesign(
+      open_sta_, name_generator_, resizer_, logger_);
+}
+
+void Restructure::resynthAnnealing(sta::Corner* corner)
+{
+  AnnealingStrategy annealing_strategy(corner,
+                                       slack_threshold_,
+                                       annealing_seed_,
+                                       annealing_temp_,
+                                       annealing_iters_,
+                                       annealing_revert_after_,
+                                       annealing_init_ops_);
+  annealing_strategy.OptimizeDesign(
+      open_sta_, name_generator_, resizer_, logger_);
 }
 
 void Restructure::run(char* liberty_file_name,
@@ -209,7 +235,7 @@ void Restructure::runABC()
       child_proc[curr_mode_idx]
           = Cmd_CommandExecute(abc_frame, command.c_str());
       if (child_proc[curr_mode_idx]) {
-        logger_->error(RMP, 26, "Error executing ABC command {}.", command);
+        logger_->error(RMP, 6, "Error executing ABC command {}.", command);
         return;
       }
       Abc_Stop();
@@ -276,13 +302,14 @@ void Restructure::runABC()
                countConsts(block_));
   } else {
     logger_->info(
-        RMP, 21, "All re-synthesis runs discarded, keeping original netlist.");
+        RMP, 4, "All re-synthesis runs discarded, keeping original netlist.");
   }
 
   for (const auto& file_to_remove : files_to_remove) {
     if (!logger_->debugCheck(RMP, "remap", 1)) {
-      if (std::remove(file_to_remove.c_str()) != 0) {
-        logger_->error(RMP, 37, "Fail to remove file {}", file_to_remove);
+      std::error_code err;
+      if (std::filesystem::remove(file_to_remove, err); err) {
+        logger_->error(RMP, 11, "Fail to remove file {}", file_to_remove);
       }
     }
   }
@@ -291,7 +318,7 @@ void Restructure::runABC()
 void Restructure::postABC(float worst_slack)
 {
   // Leave the parasitics up to date.
-  resizer_->estimateWireParasitics();
+  estimate_parasitics_->estimateWireParasitics();
 }
 void Restructure::getEndPoints(sta::PinSet& ends,
                                bool area_mode,
@@ -444,7 +471,7 @@ void Restructure::removeConstCells()
             iterm->disconnect();
             new_inst->getITerm(const_port)->connect(net);
           } else {
-            logger_->warn(RMP, 35, "Could not create instance {}.", inst_name);
+            logger_->warn(RMP, 9, "Could not create instance {}.", inst_name);
           }
         }
         const_outputs++;
@@ -480,7 +507,7 @@ bool Restructure::writeAbcScript(std::string file_name)
   std::ofstream script(file_name.c_str());
 
   if (!script.is_open()) {
-    logger_->error(RMP, 20, "Cannot open file {} for writing.", file_name);
+    logger_->error(RMP, 3, "Cannot open file {} for writing.", file_name);
     return false;
   }
 
@@ -592,7 +619,7 @@ void Restructure::setMode(const char* mode_name)
   } else if (!strcmp(mode_name, "area")) {
     opt_mode_ = Mode::AREA_1;
   } else {
-    logger_->warn(RMP, 36, "Mode {} not recognized.", mode_name);
+    logger_->warn(RMP, 10, "Mode {} not recognized.", mode_name);
   }
 }
 
@@ -618,10 +645,11 @@ bool Restructure::readAbcLog(std::string abc_file_name,
 {
   std::ifstream abc_file(abc_file_name);
   if (abc_file.bad()) {
-    logger_->error(RMP, 16, "cannot open file {}", abc_file_name);
+    logger_->error(RMP, 2, "cannot open file {}", abc_file_name);
     return false;
   }
-  logger_->report("Reading ABC log {}.", abc_file_name);
+  debugPrint(
+      logger_, utl::RMP, "remap", 1, "Reading ABC log {}.", abc_file_name);
   std::string buf;
   const char delimiter = ' ';
   bool status = true;
@@ -642,7 +670,7 @@ bool Restructure::readAbcLog(std::string abc_file_name,
     if (!tokens.empty() && tokens[0] == "Error:") {
       status = false;
       logger_->warn(RMP,
-                    25,
+                    5,
                     "ABC run failed, see log file {} for details.",
                     abc_file_name);
       break;
