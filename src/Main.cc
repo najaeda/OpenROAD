@@ -2,10 +2,10 @@
 // Copyright (c) 2019-2025, The OpenROAD Authors
 
 #include <libgen.h>
-#include <tcl.h>
+#include <stdlib.h>  // NOLINT(modernize-deprecated-headers): for setenv()
+#include <strings.h>
 
 #include <array>
-#include <boost/stacktrace.hpp>
 #include <climits>
 #include <clocale>
 #include <csignal>
@@ -15,6 +15,10 @@
 #include <iostream>
 #include <memory>
 #include <string>
+#include <system_error>
+
+#include "boost/stacktrace/stacktrace.hpp"
+#include "tcl.h"
 #ifdef ENABLE_READLINE
 // If you get an error on this include be sure you have
 //   the package tcl-tclreadline-devel installed
@@ -29,6 +33,7 @@
 #include <tclExtend.h>
 #endif
 
+#include "cut/abc_init.h"
 #include "gui/gui.h"
 #include "ord/Design.h"
 #include "ord/InitOpenRoad.hh"
@@ -54,6 +59,7 @@ using std::string;
   X(grt)                                 \
   X(gpl)                                 \
   X(dpl)                                 \
+  X(exa)                                 \
   X(ppl)                                 \
   X(tap)                                 \
   X(cts)                                 \
@@ -62,6 +68,7 @@ using std::string;
   X(par)                                 \
   X(rcx)                                 \
   X(rmp)                                 \
+  X(cgt)                                 \
   X(stt)                                 \
   X(psm)                                 \
   X(pdn)                                 \
@@ -81,6 +88,7 @@ int cmd_argc;
 char** cmd_argv;
 static const char* log_filename = nullptr;
 static const char* metrics_filename = nullptr;
+static const char* read_odb_filename = nullptr;
 static bool no_settings = false;
 static bool minimize = false;
 
@@ -226,14 +234,17 @@ int main(int argc, char* argv[])
 
   log_filename = findCmdLineKey(argc, argv, "-log");
   if (log_filename) {
-    remove(log_filename);
+    std::error_code err_ignore;
+    std::filesystem::remove(log_filename, err_ignore);
   }
 
   metrics_filename = findCmdLineKey(argc, argv, "-metrics");
   if (metrics_filename) {
-    remove(metrics_filename);
+    std::error_code err_ignored;
+    std::filesystem::remove(metrics_filename, err_ignored);
   }
 
+  read_odb_filename = findCmdLineKey(argc, argv, "-db");
   no_settings = findCmdLineFlag(argc, argv, "-no_settings");
   minimize = findCmdLineFlag(argc, argv, "-minimize");
 
@@ -294,6 +305,9 @@ int main(int argc, char* argv[])
   // Set argc to 1 so Tcl_Main doesn't source any files.
   // Tcl_Main never returns.
   Tcl_Main(1, argv, ord::tclAppInit);
+
+  cut::abcStop();
+
   return 0;
 }
 
@@ -342,12 +356,12 @@ std::string findPathToTclreadlineInit(Tcl_Interp* interp)
   //
   // Running Docker within a bazel isolated environment introduces lots of
   // problems and is not really done.
-  const char* tclScript = R"(
+  const char* tcl_script = R"(
       namespace eval temp {
         foreach dir $::auto_path {
             set folder [file join $dir]
             set path [file join $folder "tclreadline)" TCLRL_VERSION_STR
-                          R"(" "tclreadlineInit.tcl"]
+                           R"(" "tclreadlineInit.tcl"]
             if {[file exists $path]} {
                 return $path
             }
@@ -356,7 +370,7 @@ std::string findPathToTclreadlineInit(Tcl_Interp* interp)
       }
     )";
 
-  if (Tcl_Eval(interp, tclScript) == TCL_ERROR) {
+  if (Tcl_Eval(interp, tcl_script) == TCL_ERROR) {
     std::cerr << "Tcl_Eval failed: " << Tcl_GetStringResult(interp)
               << std::endl;
     return "";
@@ -437,6 +451,21 @@ static int tclAppInit(int& argc,
 
     const bool gui_enabled = gui::Gui::enabled();
 
+    if (read_odb_filename) {
+      std::string cmd = fmt::format("read_db {{{}}}", read_odb_filename);
+      if (!gui_enabled) {
+        if (Tcl_Eval(interp, cmd.c_str()) != TCL_OK) {
+          fprintf(stderr,
+                  "Error: failed to read_db %s: %s\n",
+                  read_odb_filename,
+                  Tcl_GetStringResult(interp));
+          exit(1);
+        }
+      } else {
+        gui::Gui::get()->addRestoreStateCommand(cmd);
+      }
+    }
+
     const char* home = getenv("HOME");
     if (!findCmdLineFlag(argc, argv, "-no_init") && home) {
       const char* restore_state_cmd = "include -echo -verbose {{{}}}";
@@ -513,7 +542,7 @@ static void showUsage(const char* prog, const char* init_filename)
 {
   printf("Usage: %s [-help] [-version] [-no_init] [-no_splash] [-exit] ", prog);
   printf("[-gui] [-threads count|max] [-log file_name] [-metrics file_name] ");
-  printf("[-no_settings] [-minimize] cmd_file\n");
+  printf("[-db file_name] [-no_settings] [-minimize] cmd_file\n");
   printf("  -help                 show help and exit\n");
   printf("  -version              show version and exit\n");
   printf("  -no_init              do not read %s init file\n", init_filename);
@@ -531,6 +560,7 @@ static void showUsage(const char* prog, const char* init_filename)
   printf("  -log <file_name>      write a log in <file_name>\n");
   printf(
       "  -metrics <file_name>  write metrics in <file_name> in JSON format\n");
+  printf("  -db <file_name>      open a .odb database at startup\n");
   printf("  cmd_file              source cmd_file\n");
 }
 

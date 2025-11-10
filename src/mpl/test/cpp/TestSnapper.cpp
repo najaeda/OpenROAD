@@ -1,6 +1,14 @@
-#include <memory>
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) 2023-2025, The OpenROAD Authors
 
+#include <exception>
+#include <memory>
+#include <string>
+
+#include "../../src/hier_rtlmp.h"
 #include "MplTest.h"
+#include "gtest/gtest.h"
+#include "odb/db.h"
 
 namespace mpl {
 namespace {
@@ -11,7 +19,7 @@ class TestSnapper : public MplTest
   void SetUp() override
   {
     MplTest::SetUp();
-    snapper_ = std::make_unique<Snapper>(logger_.get());
+    snapper_ = std::make_unique<Snapper>(&logger_);
   }
 
   std::unique_ptr<Snapper> snapper_;

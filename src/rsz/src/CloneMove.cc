@@ -5,18 +5,31 @@
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "BufferMove.hh"
 #include "SplitLoadMove.hh"
+#include "odb/db.h"
+#include "odb/geom.h"
+#include "sta/ArcDelayCalc.hh"
+#include "sta/Delay.hh"
+#include "sta/Graph.hh"
+#include "sta/Liberty.hh"
+#include "sta/NetworkClass.hh"
+#include "sta/Path.hh"
+#include "sta/PathExpanded.hh"
+#include "sta/Transition.hh"
+#include "utl/Logger.h"
 
 namespace rsz {
 
+using odb::Point;
 using std::pair;
 using std::string;
 using std::vector;
-
-using odb::Point;
 
 using utl::RSZ;
 
@@ -74,21 +87,17 @@ bool CloneMove::doMove(const Path* drvr_path,
   if (fanout <= split_load_min_fanout_) {
     return false;
   }
-  const bool tristate_drvr = resizer_->isTristateDriver(drvr_pin);
-  if (tristate_drvr) {
-    return false;
-  }
-  const Net* net = db_network_->dbToSta(db_network_->flatNet(drvr_pin));
-  if (resizer_->dontTouch(net)) {
+
+  if (!resizer_->okToBufferNet(drvr_pin)) {
     return false;
   }
   // We can probably relax this with the new ECO code
-  if (resizer_->buffer_move->hasPendingMoves(db_network_->instance(drvr_pin))
+  if (resizer_->buffer_move_->hasPendingMoves(db_network_->instance(drvr_pin))
       > 0) {
     return false;
   }
   // We can probably relax this with the new ECO code
-  if (resizer_->split_load_move->hasPendingMoves(
+  if (resizer_->split_load_move_->hasPendingMoves(
           db_network_->instance(drvr_pin))
       > 0) {
     return false;
@@ -97,7 +106,7 @@ bool CloneMove::doMove(const Path* drvr_path,
   // Divide and conquer.
   debugPrint(logger_,
              RSZ,
-             "moves",
+             "clone",
              3,
              "clone driver {} -> {}",
              network_->pathName(drvr_pin),
@@ -123,7 +132,7 @@ bool CloneMove::doMove(const Path* drvr_path,
     const Slack slack_margin = fanout_slack - drvr_slack;
     debugPrint(logger_,
                RSZ,
-               "moves",
+               "clone",
                4,
                " fanin {} slack_margin = {}",
                network_->pathName(fanout_vertex->pin()),
@@ -144,10 +153,14 @@ bool CloneMove::doMove(const Path* drvr_path,
   Instance* drvr_inst = db_network_->instance(drvr_pin);
 
   if (!resizer_->isSingleOutputCombinational(drvr_inst)) {
+    debugPrint(logger_,
+               RSZ,
+               "opt_moves",
+               3,
+               "REJECT clone {}",
+               network_->pathName(drvr_pin));
     return false;
   }
-
-  const string buffer_name = resizer_->makeUniqueInstName("clone");
 
   // Hierarchy fix
   Instance* parent = db_network_->getOwningInstanceParent(drvr_pin);
@@ -165,23 +178,18 @@ bool CloneMove::doMove(const Path* drvr_path,
   }
 
   Point drvr_loc = computeCloneGateLocation(drvr_pin, fanout_slacks);
-  Instance* clone_inst = resizer_->makeInstance(
-      clone_cell, buffer_name.c_str(), parent, drvr_loc);
+  Instance* clone_inst
+      = resizer_->makeInstance(clone_cell, "clone", parent, drvr_loc);
 
   debugPrint(logger_,
              RSZ,
-             "moves",
+             "opt_moves",
              1,
-             "clone_move {} ({}) -> {} ({})",
+             "ACCEPT clone {} ({}) -> {} ({})",
              network_->pathName(drvr_pin),
              original_cell->name(),
              network_->pathName(clone_inst),
              clone_cell->name());
-  addMove(clone_inst);
-  // We add the driver instance to the pending move set, but don't count it as a
-  // move.
-  addMove(drvr_inst, 0);
-
   debugPrint(logger_,
              RSZ,
              "repair_setup",
@@ -191,12 +199,14 @@ bool CloneMove::doMove(const Path* drvr_path,
              original_cell->name(),
              network_->pathName(clone_inst),
              clone_cell->name());
+  addMove(clone_inst);
+  // We add the driver instance to the pending move set, but don't count it as a
+  // move.
+  addMove(drvr_inst, 0);
 
   // Hierarchy fix, make out_net in parent.
 
-  //  Net* out_net = resizer_->makeUniqueNet();
-  std::string out_net_name = resizer_->makeUniqueNetName();
-  Net* out_net = db_network_->makeNet(out_net_name.c_str(), parent);
+  Net* out_net = db_network_->makeNet(parent);
 
   std::unique_ptr<InstancePinIterator> inst_pin_iter{
       network_->pinIterator(drvr_inst)};
@@ -224,7 +234,6 @@ bool CloneMove::doMove(const Path* drvr_path,
       if (modnet) {
         iterm->connect(modnet);
       }
-      resizer_->parasiticsInvalid(db_network_->dbToSta(dbnet));
     }
   }
 
@@ -248,6 +257,15 @@ bool CloneMove::doMove(const Path* drvr_path,
   // hierarchical wiring
 
   odb::dbITerm* clone_output_iterm = db_network_->flatPin(clone_output_pin);
+  if (clone_output_iterm == nullptr) {
+    logger_->error(
+        RSZ,
+        100,
+        "Cannot find output pin of the clone instance. Driver pin: {}, "
+        "Clone output pin: {}",
+        (drvr_pin) ? network_->pathName(drvr_pin) : "Null",
+        (clone_output_pin) ? network_->pathName(clone_output_pin) : "Null");
+  }
 
   // Divide the list of pins in half and connect them to the new net we
   // created as part of gate cloning. Skip ports connected to the original net
@@ -271,16 +289,12 @@ bool CloneMove::doMove(const Path* drvr_path,
       // hierarchy fix: if load and clone in different modules
       // do the cross module wiring.
       if (load_parent_inst != parent) {
-        std::string unique_connection_name = resizer_->makeUniqueNetName();
-        db_network_->hierarchicalConnect(
-            clone_output_iterm, load_iterm, unique_connection_name.c_str());
+        db_network_->hierarchicalConnect(clone_output_iterm, load_iterm);
       } else {
         sta_->connectPin(load, load_port, out_net);
       }
     }
   }
-  resizer_->parasiticsInvalid(out_net);
-  resizer_->parasiticsInvalid(network_->net(drvr_pin));
   return true;
 }
 

@@ -3,8 +3,11 @@
 
 #pragma once
 
+#include <string.h>
+
 #include <array>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <istream>
 #include <map>
@@ -16,9 +19,10 @@
 #include <variant>
 #include <vector>
 
-#include "ZException.h"
-#include "dbObject.h"
-#include "odb.h"
+#include "boost/container/flat_map.hpp"
+#include "odb/ZException.h"
+#include "odb/dbObject.h"
+#include "odb/odb.h"
 
 namespace odb {
 
@@ -140,12 +144,6 @@ class dbOStream
     return *this;
   }
 
-  dbOStream& operator<<(dbObjectType c)
-  {
-    writeValueAsBytes(c);
-    return *this;
-  }
-
   template <class T1, class T2>
   dbOStream& operator<<(const std::pair<T1, T2>& p)
   {
@@ -170,6 +168,18 @@ class dbOStream
 
   template <class T1, class T2>
   dbOStream& operator<<(const std::map<T1, T2>& m)
+  {
+    uint sz = m.size();
+    *this << sz;
+    for (auto const& [key, val] : m) {
+      *this << key;
+      *this << val;
+    }
+    return *this;
+  }
+
+  template <class T1, class T2>
+  dbOStream& operator<<(const boost::container::flat_map<T1, T2>& m)
   {
     uint sz = m.size();
     *this << sz;
@@ -362,12 +372,6 @@ class dbIStream
     return *this;
   }
 
-  dbIStream& operator>>(dbObjectType& c)
-  {
-    _f.read(reinterpret_cast<char*>(&c), sizeof(c));
-    return *this;
-  }
-
   template <class T1, class T2>
   dbIStream& operator>>(std::pair<T1, T2>& p)
   {
@@ -380,12 +384,28 @@ class dbIStream
   {
     uint sz;
     *this >> sz;
+    m.clear();
     for (uint i = 0; i < sz; i++) {
       T1 key;
       T2 val;
       *this >> key;
       *this >> val;
-      m[key] = val;
+      m[key] = std::move(val);
+    }
+    return *this;
+  }
+  template <class T1, class T2>
+  dbIStream& operator>>(boost::container::flat_map<T1, T2>& m)
+  {
+    uint sz;
+    *this >> sz;
+    m.clear();
+    for (uint i = 0; i < sz; i++) {
+      T1 key;
+      T2 val;
+      *this >> key;
+      *this >> val;
+      m[key] = std::move(val);
     }
     return *this;
   }
@@ -394,12 +414,13 @@ class dbIStream
   {
     uint sz;
     *this >> sz;
+    m.clear();
     for (uint i = 0; i < sz; i++) {
       T1 key;
       T2 val;
       *this >> key;
       *this >> val;
-      m[key] = val;
+      m[key] = std::move(val);
     }
     return *this;
   }
@@ -409,11 +430,12 @@ class dbIStream
   {
     uint sz;
     *this >> sz;
+    m.clear();
     m.reserve(sz);
     for (uint i = 0; i < sz; i++) {
       T1 val;
       *this >> val;
-      m.push_back(val);
+      m.push_back(std::move(val));
     }
     return *this;
   }
@@ -479,7 +501,7 @@ class dbIStream
       if (I == index) {
         std::variant_alternative_t<I, std::variant<Ts...>> val;
         *this >> val;
-        v = val;
+        v = std::move(val);
       }
       return (*this).variantHelper<I + 1>(index, v);
     }

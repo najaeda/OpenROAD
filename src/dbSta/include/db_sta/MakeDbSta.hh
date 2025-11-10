@@ -3,25 +3,10 @@
 
 #pragma once
 
-#include <tcl.h>
-
-namespace utl {
-class Logger;
-}
-
-namespace odb {
-class dbDatabase;
-}
+#include "tcl.h"
 
 namespace sta {
 
-class dbSta;
-
-sta::dbSta* makeDbSta();
-void deleteDbSta(sta::dbSta* sta);
-void initDbSta(sta::dbSta* sta,
-               utl::Logger* logger,
-               Tcl_Interp* tcl_interp,
-               odb::dbDatabase* db);
+void initDbSta(Tcl_Interp* tcl_interp);
 
 }  // namespace sta

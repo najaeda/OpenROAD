@@ -4,6 +4,7 @@
 #pragma once
 
 #include <algorithm>
+#include <list>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -11,6 +12,7 @@
 #include "db/grObj/grShape.h"
 #include "db/grObj/grVia.h"
 #include "db/obj/frBlockObject.h"
+#include "db/obj/frFig.h"
 #include "db/obj/frGuide.h"
 #include "db/obj/frNode.h"
 #include "db/obj/frRPin.h"
@@ -18,6 +20,7 @@
 #include "db/obj/frVia.h"
 #include "frBaseTypes.h"
 #include "global.h"
+#include "odb/dbTypes.h"
 
 namespace drt {
 class frInstTerm;
@@ -186,8 +189,8 @@ class frNet : public frBlockObject
     vias_.clear();
     pwires_.clear();
   }
-  dbSigType getType() const { return type_; }
-  void setType(const dbSigType& in) { type_ = in; }
+  odb::dbSigType getType() const { return type_; }
+  void setType(const odb::dbSigType& in) { type_ = in; }
   frBlockObjectEnum typeId() const override { return frcNet; }
   void updateNondefaultRule(frNonDefaultRule* n)
   {
@@ -195,8 +198,8 @@ class frNet : public frBlockObject
     updateAbsPriority();
   }
   bool hasNDR() const { return getNondefaultRule() != nullptr; }
-  void setAbsPriorityLvl(int l) { absPriorityLvl = l; }
-  int getAbsPriorityLvl() const { return absPriorityLvl; }
+  void setAbsPriorityLvl(int l) { absPriorityLvl_ = l; }
+  int getAbsPriorityLvl() const { return absPriorityLvl_; }
   bool isClock() const { return isClock_; }
   void updateIsClock(bool ic)
   {
@@ -205,14 +208,14 @@ class frNet : public frBlockObject
   }
   void updateAbsPriority()
   {
-    int max = absPriorityLvl;
+    int max = absPriorityLvl_;
     if (hasNDR()) {
       max = std::max(max, router_cfg_->NDR_NETS_ABS_PRIORITY);
     }
     if (isClock()) {
       max = std::max(max, router_cfg_->CLOCK_NETS_ABS_PRIORITY);
     }
-    absPriorityLvl = max;
+    absPriorityLvl_ = max;
   }
   bool isSpecial() const { return is_special_; }
   void setIsSpecial(bool s) { is_special_ = s; }
@@ -249,12 +252,12 @@ class frNet : public frBlockObject
   std::vector<std::unique_ptr<frRPin>> rpins_;
   std::vector<std::unique_ptr<frGuide>> guides_;
   std::vector<frRect> orig_guides_;
-  dbSigType type_{dbSigType::SIGNAL};
+  odb::dbSigType type_{odb::dbSigType::SIGNAL};
   bool modified_{false};
   bool isFakeNet_{false};  // indicate floating PG nets
   frNonDefaultRule* ndr_{nullptr};
-  int absPriorityLvl{0};  // absolute priority level: will be checked in net
-                          // ordering before other criteria
+  int absPriorityLvl_{0};  // absolute priority level: will be checked in net
+                           // ordering before other criteria
   bool isClock_{false};
   bool is_special_{false};
   bool is_connected_by_abutment_{false};

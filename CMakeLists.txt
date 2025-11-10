@@ -194,25 +194,7 @@ if(BUILD_MAN)
   install(DIRECTORY ${OPENROAD_HOME}/docs/html DESTINATION ${OPENROAD_SHARE}/man)
 endif()
 
-find_package(Boost REQUIRED)
-
-set(CAPNP_INCLUDE_DIR "${CAPNP_DIR}/include")
-set(CAPNP_LIBRARY_DIR "${CAPNP_DIR}/lib")
-find_package(CapnProto REQUIRED PATHS ${CAPNP_DIR})
-include_directories(${CAPNP_INCLUDE_DIR})
-link_directories(${CAPNP_LIBRARY_DIR})
-
-# set(FLEX_INCLUDE_DIR /opt/homebrew/opt/flex/include CACHE PATH "Path to Flex include")
-# set(TCL_LIBRARY /opt/local/lib/libtcl.dylib CACHE PATH "Path to Tcl library")
-# set(TCL_INCLUDE_DIR /opt/local/include/ CACHE PATH "Path to Tcl include")
-
-# Apply globally for all targets
-# include_directories(${FLEX_INCLUDE_DIR} ${TCL_INCLUDE_DIR})
-
-# # Set Tcl paths
-# set(TCL_LIBRARY /opt/local/lib/libtcl.dylib)
-# set(TCL_INCLUDE_DIR /opt/local/include/)
-# set(FLEX_INCLUDE_DIRS /opt/homebrew/opt/flex/include)
-# set(FLEX_INCLUDE_DIR /opt/homebrew/opt/flex/include)
-
-
+####################################################################
+# Add a configuration for ReleaseWithAsserts
+set(CMAKE_CXX_FLAGS_RELEASEWITHASSERTS "${CMAKE_CXX_FLAGS_RELEASE} -UNDEBUG" CACHE STRING "" FORCE)
+set(CMAKE_C_FLAGS_RELEASEWITHASSERTS "${CMAKE_C_FLAGS_RELEASE} -UNDEBUG" CACHE STRING "" FORCE)

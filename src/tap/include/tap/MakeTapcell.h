@@ -3,26 +3,10 @@
 
 #pragma once
 
-#include <tcl.h>
-
-namespace odb {
-class dbDatabase;
-}
-
-namespace utl {
-class Logger;
-}
+#include "tcl.h"
 
 namespace tap {
-class Tapcell;
 
-tap::Tapcell* makeTapcell();
-
-void deleteTapcell(tap::Tapcell* tapcell);
-
-void initTapcell(tap::Tapcell* tapcell,
-                 odb::dbDatabase* db,
-                 utl::Logger* logger,
-                 Tcl_Interp* tcl_interp);
+void initTapcell(Tcl_Interp* tcl_interp);
 
 }  // namespace tap

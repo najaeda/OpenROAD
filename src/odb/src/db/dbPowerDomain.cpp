@@ -16,6 +16,7 @@
 #include "odb/db.h"
 // User Code Begin Includes
 #include <cmath>
+#include <cstdlib>
 #include <string>
 #include <vector>
 
@@ -202,8 +203,7 @@ dbPowerDomain* dbPowerDomain::create(dbBlock* block, const char* name)
     return nullptr;
   }
   _dbPowerDomain* pd = _block->_powerdomain_tbl->create();
-  pd->_name = strdup(name);
-  ZALLOCATED(pd->_name);
+  pd->_name = safe_strdup(name);
 
   _block->_powerdomain_hash.insert(pd);
   return (dbPowerDomain*) pd;

@@ -4,7 +4,7 @@
 #include "placerBase.h"
 
 #include <algorithm>
-#include <iostream>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <utility>
@@ -12,7 +12,9 @@
 
 #include "nesterovBase.h"
 #include "odb/db.h"
+#include "odb/dbSet.h"
 #include "odb/dbTransform.h"
+#include "odb/dbTypes.h"
 #include "utl/Logger.h"
 
 namespace gpl {
@@ -27,7 +29,6 @@ using odb::dbITerm;
 using odb::dbMPin;
 using odb::dbNet;
 using odb::dbPlacementStatus;
-using odb::dbPowerDomain;
 using odb::dbRow;
 using odb::dbSet;
 using odb::dbSigType;
@@ -54,29 +55,20 @@ Instance::Instance() = default;
 
 // for movable real instances
 Instance::Instance(odb::dbInst* inst,
-                   int padLeft,
-                   int padRight,
-                   int site_height,
+                   PlacerBaseCommon* pbc,
                    utl::Logger* logger)
     : Instance()
 {
   inst_ = inst;
-  dbBox* bbox = inst->getBBox();
-  inst->getLocation(lx_, ly_);
-  ux_ = lx_ + bbox->getDX();
-  uy_ = ly_ + bbox->getDY();
-
-  if (isPlaceInstance()) {
-    lx_ -= padLeft;
-    ux_ += padRight;
-  }
+  copyDbLocation(pbc);
 
   // Masters more than row_limit rows tall are treated as macros
   constexpr int row_limit = 6;
+  dbBox* bbox = inst->getBBox();
 
   if (inst->getMaster()->getType().isBlock()) {
     is_macro_ = true;
-  } else if (bbox->getDY() > 6 * site_height) {
+  } else if (bbox->getDY() > row_limit * pbc->siteSizeY()) {
     is_macro_ = true;
     logger->warn(GPL,
                  134,
@@ -103,6 +95,19 @@ Instance::~Instance()
   lx_ = ly_ = 0;
   ux_ = uy_ = 0;
   pins_.clear();
+}
+
+void Instance::copyDbLocation(PlacerBaseCommon* pbc)
+{
+  dbBox* bbox = inst_->getBBox();
+  inst_->getLocation(lx_, ly_);
+  ux_ = lx_ + bbox->getDX();
+  uy_ = ly_ + bbox->getDY();
+
+  if (isPlaceInstance()) {
+    lx_ -= pbc->getPadLeft() * pbc->siteSizeX();
+    ux_ += pbc->getPadRight() * pbc->siteSizeX();
+  }
 }
 
 bool Instance::isFixed() const
@@ -295,26 +300,26 @@ Pin::Pin()
 Pin::Pin(odb::dbITerm* iTerm) : Pin()
 {
   setITerm();
-  term_ = (void*) iTerm;
+  term_ = iTerm;
   updateCoordi(iTerm);
 }
 
 Pin::Pin(odb::dbBTerm* bTerm, utl::Logger* logger) : Pin()
 {
   setBTerm();
-  term_ = (void*) bTerm;
+  term_ = bTerm;
   updateCoordi(bTerm, logger);
 }
 
-std::string Pin::name() const
+std::string Pin::getName() const
 {
   if (!term_) {
     return "DUMMY";
   }
   if (isITerm()) {
-    return dbITerm()->getName();
+    return getDbITerm()->getName();
   }
-  return dbBTerm()->getName();
+  return getDbBTerm()->getName();
 }
 
 void Pin::setITerm()
@@ -407,21 +412,21 @@ int Pin::cy() const
   return cy_;
 }
 
-int Pin::offsetCx() const
+int Pin::getOffsetCx() const
 {
   return offsetCx_;
 }
 
-int Pin::offsetCy() const
+int Pin::getOffsetCy() const
 {
   return offsetCy_;
 }
 
-odb::dbITerm* Pin::dbITerm() const
+odb::dbITerm* Pin::getDbITerm() const
 {
   return (isITerm()) ? (odb::dbITerm*) term_ : nullptr;
 }
-odb::dbBTerm* Pin::dbBTerm() const
+odb::dbBTerm* Pin::getDbBTerm() const
 {
   return (isBTerm()) ? (odb::dbBTerm*) term_ : nullptr;
 }
@@ -477,33 +482,17 @@ void Pin::updateCoordi(odb::dbITerm* iTerm)
 //
 void Pin::updateCoordi(odb::dbBTerm* bTerm, utl::Logger* logger)
 {
-  int lx = INT_MAX;
-  int ly = INT_MAX;
-  int ux = INT_MIN;
-  int uy = INT_MIN;
-
-  for (dbBPin* bPin : bTerm->getBPins()) {
-    Rect bbox = bPin->getBBox();
-    lx = std::min(bbox.xMin(), lx);
-    ly = std::min(bbox.yMin(), ly);
-    ux = std::max(bbox.xMax(), ux);
-    uy = std::max(bbox.yMax(), uy);
-  }
-
-  if (lx == INT_MAX || ly == INT_MAX || ux == INT_MIN || uy == INT_MIN) {
-    logger->warn(GPL,
-                 1,
-                 "{} toplevel port is not placed!\n"
-                 "       Replace will regard {} is placed in (0, 0)",
-                 bTerm->getConstName(),
-                 bTerm->getConstName());
+  Rect bbox = bTerm->getBBox();
+  if (bbox.isInverted()) {
+    logger->error(
+        GPL, 1, "{} toplevel port is not placed.", bTerm->getConstName());
   }
 
   // Just center
   offsetCx_ = offsetCy_ = 0;
 
-  cx_ = (lx + ux) / 2;
-  cy_ = (ly + uy) / 2;
+  cx_ = bbox.xCenter();
+  cy_ = bbox.yCenter();
 }
 
 void Pin::updateLocation(const Instance* inst)
@@ -584,7 +573,7 @@ int Net::cy() const
   return (ly_ + uy_) / 2;
 }
 
-int64_t Net::hpwl() const
+int64_t Net::getHpwl() const
 {
   if (ux_ < lx_) {  // dangling net
     return 0;
@@ -751,28 +740,28 @@ void PlacerBaseCommon::init()
   dbBlock* block = db_->getChip()->getBlock();
 
   // die-core area update
-  odb::dbSite* site = nullptr;
+  odb::dbSite* db_site = nullptr;
   for (auto* row : block->getRows()) {
     if (row->getSite()->getClass() != odb::dbSiteClass::PAD) {
-      site = row->getSite();
+      db_site = row->getSite();
       break;
     }
   }
-  if (site == nullptr) {
+  if (db_site == nullptr) {
     log_->error(GPL, 305, "Unable to find a site");
   }
-  odb::Rect coreRect = block->getCoreArea();
-  odb::Rect dieRect = block->getDieArea();
+  odb::Rect core_rect = block->getCoreArea();
+  odb::Rect die_rect = block->getDieArea();
 
-  if (!dieRect.contains(coreRect)) {
+  if (!die_rect.contains(core_rect)) {
     log_->error(GPL, 118, "core area outside of die.");
   }
 
-  die_ = Die(dieRect, coreRect);
+  die_ = Die(die_rect, core_rect);
 
   // siteSize update
-  siteSizeX_ = site->getWidth();
-  siteSizeY_ = site->getHeight();
+  siteSizeX_ = db_site->getWidth();
+  siteSizeY_ = db_site->getHeight();
 
   log_->info(GPL,
              3,
@@ -790,80 +779,80 @@ void PlacerBaseCommon::init()
              block->dbuToMicrons(die_.coreUy()));
 
   // insts fill with real instances
-  dbSet<dbInst> insts = block->getInsts();
-  instStor_.reserve(insts.size());
+  dbSet<dbInst> db_insts = block->getInsts();
+  instStor_.reserve(db_insts.size());
   insts_.reserve(instStor_.size());
-  for (dbInst* inst : insts) {
-    auto type = inst->getMaster()->getType();
+  for (dbInst* db_inst : db_insts) {
+    auto type = db_inst->getMaster()->getType();
     if (!type.isCore() && !type.isBlock()) {
       continue;
     }
-    Instance myInst(inst,
-                    pbVars_.padLeft * siteSizeX_,
-                    pbVars_.padRight * siteSizeX_,
-                    siteSizeY_,
-                    log_);
+
+    Instance temp_inst(db_inst, this, log_);
+    odb::dbBox* inst_bbox = db_inst->getBBox();
+    if (inst_bbox->getDY() > die_.coreDy()) {
+      log_->error(GPL,
+                  119,
+                  "instance {} height is larger than core.",
+                  db_inst->getName());
+    }
+    if (inst_bbox->getDX() > die_.coreDx()) {
+      log_->error(GPL,
+                  120,
+                  "instance {} width is larger than core.",
+                  db_inst->getName());
+    }
 
     // Fixed instaces need to be snapped outwards to the nearest site
     // boundary.  A partially overlapped site is unusable and this
     // is the simplest way to ensure it is counted as fully used.
-    if (myInst.isFixed()) {
-      myInst.snapOutward(coreRect.ll(), siteSizeX_, siteSizeY_);
+    if (temp_inst.isFixed()) {
+      temp_inst.snapOutward(core_rect.ll(), siteSizeX_, siteSizeY_);
     }
 
-    instStor_.push_back(myInst);
+    instStor_.push_back(temp_inst);
 
-    if (myInst.dy() > siteSizeY_ * 6) {
-      macroInstsArea_ += myInst.area();
-    }
-
-    dbBox* bbox = inst->getBBox();
-    if (bbox->getDY() > die_.coreDy()) {
-      log_->error(
-          GPL, 119, "instance {} height is larger than core.", inst->getName());
-    }
-    if (bbox->getDX() > die_.coreDx()) {
-      log_->error(
-          GPL, 120, "instance {} width is larger than core.", inst->getName());
+    if (temp_inst.dy() > siteSizeY_ * 6) {
+      macroInstsArea_ += temp_inst.area();
     }
   }
 
-  for (auto& inst : instStor_) {
-    instMap_[inst.dbInst()] = &inst;
-    insts_.push_back(&inst);
+  for (auto& pb_inst : instStor_) {
+    instMap_[pb_inst.dbInst()] = &pb_inst;
+    insts_.push_back(&pb_inst);
 
-    if (!inst.isFixed()) {
-      placeInsts_.push_back(&inst);
+    if (!pb_inst.isFixed()) {
+      placeInsts_.push_back(&pb_inst);
     }
   }
 
   // nets fill
-  dbSet<dbNet> nets = block->getNets();
-  netStor_.reserve(nets.size());
-  for (dbNet* net : nets) {
-    dbSigType netType = net->getSigType();
+  dbSet<dbNet> db_nets = block->getNets();
+  netStor_.reserve(db_nets.size());
+  for (dbNet* db_net : db_nets) {
+    dbSigType net_type = db_net->getSigType();
 
     // escape nets with VDD/VSS/reset nets
-    if (netType == dbSigType::SIGNAL || netType == dbSigType::CLOCK) {
-      Net myNet(net, pbVars_.skipIoMode);
-      netStor_.push_back(myNet);
+    if (net_type == dbSigType::SIGNAL || net_type == dbSigType::CLOCK) {
+      Net temp_net(db_net, pbVars_.skipIoMode);
+      netStor_.push_back(temp_net);
 
       // this is safe because of "reserve"
-      Net* myNetPtr = &netStor_[netStor_.size() - 1];
-      netMap_[net] = myNetPtr;
+      Net* temp_net_ptr = &netStor_[netStor_.size() - 1];
+      netMap_[db_net] = temp_net_ptr;
 
-      for (dbITerm* iTerm : net->getITerms()) {
-        Pin myPin(iTerm);
-        myPin.setNet(myNetPtr);
-        myPin.setInstance(dbToPb(iTerm->getInst()));
-        pinStor_.push_back(myPin);
+      for (dbITerm* iTerm : db_net->getITerms()) {
+        Pin temp_pin(iTerm);
+        temp_pin.setNet(temp_net_ptr);
+        temp_pin.setInstance(dbToPb(iTerm->getInst()));
+        pinStor_.push_back(temp_pin);
       }
 
       if (pbVars_.skipIoMode == false) {
-        for (dbBTerm* bTerm : net->getBTerms()) {
-          Pin myPin(bTerm, log_);
-          myPin.setNet(myNetPtr);
-          pinStor_.push_back(myPin);
+        for (dbBTerm* bTerm : db_net->getBTerms()) {
+          Pin temp_pin(bTerm, log_);
+          temp_pin.setNet(temp_net_ptr);
+          pinStor_.push_back(temp_pin);
         }
       }
     }
@@ -871,44 +860,44 @@ void PlacerBaseCommon::init()
 
   // pinMap_ and pins_ update
   pins_.reserve(pinStor_.size());
-  for (auto& pin : pinStor_) {
-    if (pin.isITerm()) {
-      pinMap_[(void*) pin.dbITerm()] = &pin;
-    } else if (pin.isBTerm()) {
-      pinMap_[(void*) pin.dbBTerm()] = &pin;
+  for (auto& pb_pin : pinStor_) {
+    if (pb_pin.isITerm()) {
+      pinMap_[pb_pin.getDbITerm()] = &pb_pin;
+    } else if (pb_pin.isBTerm()) {
+      pinMap_[pb_pin.getDbBTerm()] = &pb_pin;
     }
-    pins_.push_back(&pin);
+    pins_.push_back(&pb_pin);
   }
 
   // instStor_'s pins_ fill
-  for (auto& inst : instStor_) {
-    if (!inst.isInstance()) {
+  for (auto& pb_inst : instStor_) {
+    if (!pb_inst.isInstance()) {
       continue;
     }
-    for (dbITerm* iTerm : inst.dbInst()->getITerms()) {
+    for (dbITerm* iTerm : pb_inst.dbInst()->getITerms()) {
       // note that, DB's ITerm can have
       // VDD/VSS pins.
       //
       // Escape those pins
-      Pin* curPin = dbToPb(iTerm);
-      if (curPin) {
-        inst.addPin(curPin);
+      Pin* cur_pin = dbToPb(iTerm);
+      if (cur_pin) {
+        pb_inst.addPin(cur_pin);
       }
     }
   }
 
   // nets' pin update
   nets_.reserve(netStor_.size());
-  for (auto& net : netStor_) {
-    for (dbITerm* iTerm : net.dbNet()->getITerms()) {
-      net.addPin(dbToPb(iTerm));
+  for (auto& pb_net : netStor_) {
+    for (dbITerm* iTerm : pb_net.getDbNet()->getITerms()) {
+      pb_net.addPin(dbToPb(iTerm));
     }
     if (pbVars_.skipIoMode == false) {
-      for (dbBTerm* bTerm : net.dbNet()->getBTerms()) {
-        net.addPin(dbToPb(bTerm));
+      for (dbBTerm* bTerm : pb_net.getDbNet()->getBTerms()) {
+        pb_net.addPin(dbToPb(bTerm));
       }
     }
-    nets_.push_back(&net);
+    nets_.push_back(&pb_net);
   }
 }
 
@@ -930,12 +919,12 @@ void PlacerBaseCommon::reset()
   netMap_.clear();
 }
 
-int64_t PlacerBaseCommon::hpwl() const
+int64_t PlacerBaseCommon::getHpwl() const
 {
   int64_t hpwl = 0;
   for (auto& net : nets_) {
     net->updateBox(pbVars_.skipIoMode);
-    hpwl += net->hpwl();
+    hpwl += net->getHpwl();
   }
   return hpwl;
 }
@@ -948,13 +937,13 @@ Instance* PlacerBaseCommon::dbToPb(odb::dbInst* inst) const
 
 Pin* PlacerBaseCommon::dbToPb(odb::dbITerm* term) const
 {
-  auto pinPtr = pinMap_.find((void*) term);
+  auto pinPtr = pinMap_.find(term);
   return (pinPtr == pinMap_.end()) ? nullptr : pinPtr->second;
 }
 
 Pin* PlacerBaseCommon::dbToPb(odb::dbBTerm* term) const
 {
-  auto pinPtr = pinMap_.find((void*) term);
+  auto pinPtr = pinMap_.find(term);
   return (pinPtr == pinMap_.end()) ? nullptr : pinPtr->second;
 }
 
@@ -990,6 +979,10 @@ PlacerBase::PlacerBase(odb::dbDatabase* db,
   log_ = log;
   pbCommon_ = std::move(pbCommon);
   group_ = group;
+  log_->info(GPL,
+             32,
+             "Initializing region: {}",
+             (group_ == nullptr) ? "Top-level" : group_->getName());
   init();
 }
 
@@ -1000,19 +993,52 @@ PlacerBase::~PlacerBase()
 
 void PlacerBase::init()
 {
-  die_ = pbCommon_->die();
+  die_ = pbCommon_->getDie();
+  if (group_ != nullptr) {
+    auto boundaries = group_->getRegion()->getBoundaries();
+
+    if (!boundaries.empty()) {
+      region_bbox_.mergeInit();
+      for (auto boundary : boundaries) {
+        region_bbox_.merge(boundary->getBox());
+      }
+      region_area_ = region_bbox_.area();
+    } else {
+      region_bbox_ = odb::Rect(
+          die_.coreLx(), die_.coreLy(), die_.coreUx(), die_.coreUy());
+      region_area_ = die_.coreArea();
+    }
+  } else {
+    region_bbox_
+        = odb::Rect(die_.coreLx(), die_.coreLy(), die_.coreUx(), die_.coreUy());
+    region_area_ = die_.coreArea();
+  }
 
   // siteSize update
   siteSizeX_ = pbCommon_->siteSizeX();
   siteSizeY_ = pbCommon_->siteSizeY();
 
-  for (auto& inst : pbCommon_->insts()) {
+  for (auto& inst : pbCommon_->getInsts()) {
     if (!inst->isInstance()) {
       continue;
     }
 
-    if (inst->dbInst() && inst->dbInst()->getGroup() != group_) {
+    odb::dbInst* db_inst = inst->dbInst();
+    if (!db_inst) {
       continue;
+    }
+
+    odb::dbGroup* db_inst_group = db_inst->getGroup();
+    if (group_ == nullptr) {
+      if (db_inst_group
+          && db_inst_group->getType() != odb::dbGroupType::VISUAL_DEBUG) {
+        continue;
+      }
+    } else {
+      if (!db_inst_group || db_inst_group != group_
+          || db_inst_group->getType() == odb::dbGroupType::VISUAL_DEBUG) {
+        continue;
+      }
     }
 
     if (inst->isFixed()) {
@@ -1065,46 +1091,30 @@ void PlacerBase::init()
 void PlacerBase::initInstsForUnusableSites()
 {
   dbSet<dbRow> rows = db_->getChip()->getBlock()->getRows();
-  dbSet<dbPowerDomain> pds = db_->getChip()->getBlock()->getPowerDomains();
 
   int64_t siteCountX = (die_.coreUx() - die_.coreLx()) / siteSizeX_;
   int64_t siteCountY = (die_.coreUy() - die_.coreLy()) / siteSizeY_;
 
-  enum PlaceInfo
+  enum SiteInfo
   {
-    Empty,
-    Row,
-    FixedInst
+    Blocked,   // site representation of dummy instances
+    Row,       // placable site
+    FixedInst  // site taken by fixed instance
   };
 
   //
-  // Initialize siteGrid as empty
+  // Initialize siteGrid as Row.
+  // All sites placeable so we avoid dummies creation due to regions
   //
-  std::vector<PlaceInfo> siteGrid(siteCountX * siteCountY, PlaceInfo::Empty);
+  std::vector<SiteInfo> siteGrid(siteCountX * siteCountY, SiteInfo::Row);
 
-  // check if this belongs to a group
-  // if there is a group, only mark the sites that belong to the group as Row
-  // if there is no group, then mark all as Row, and then for each power
-  // domain, mark the sites that belong to the power domain as Empty
+  // If we have no group (top-level), check which sites are NOT covered by
+  // actual rows Create dummy instances for unusable sites (test simple02.tcl
+  // has an example on bottom right)
+  if (group_ == nullptr) {
+    std::fill(siteGrid.begin(), siteGrid.end(), SiteInfo::Blocked);
 
-  if (group_ != nullptr) {
-    for (auto boundary : group_->getRegion()->getBoundaries()) {
-      Rect rect = boundary->getBox();
-
-      std::pair<int, int> pairX = getMinMaxIdx(
-          rect.xMin(), rect.xMax(), die_.coreLx(), siteSizeX_, 0, siteCountX);
-
-      std::pair<int, int> pairY = getMinMaxIdx(
-          rect.yMin(), rect.yMax(), die_.coreLy(), siteSizeY_, 0, siteCountY);
-
-      for (int i = pairX.first; i < pairX.second; i++) {
-        for (int j = pairY.first; j < pairY.second; j++) {
-          siteGrid[j * siteCountX + i] = Row;
-        }
-      }
-    }
-  } else {
-    // fill in rows' bbox
+    // Mark only sites covered by actual rows as Row
     for (dbRow* row : rows) {
       Rect rect = row->getBBox();
 
@@ -1116,13 +1126,43 @@ void PlacerBase::initInstsForUnusableSites()
 
       for (int i = pairX.first; i < pairX.second; i++) {
         for (int j = pairY.first; j < pairY.second; j++) {
-          siteGrid[j * siteCountX + i] = Row;
+          siteGrid[(j * siteCountX) + i] = Row;
+        }
+      }
+    }
+
+    // Mark sites intersecting with any region as Blocked
+    for (auto* group : db_->getChip()->getBlock()->getGroups()) {
+      if (group->getRegion()) {
+        auto boundaries = group->getRegion()->getBoundaries();
+        for (auto boundary : boundaries) {
+          Rect rect = boundary->getBox();
+
+          std::pair<int, int> pairX = getMinMaxIdx(rect.xMin(),
+                                                   rect.xMax(),
+                                                   die_.coreLx(),
+                                                   siteSizeX_,
+                                                   0,
+                                                   siteCountX);
+
+          std::pair<int, int> pairY = getMinMaxIdx(rect.yMin(),
+                                                   rect.yMax(),
+                                                   die_.coreLy(),
+                                                   siteSizeY_,
+                                                   0,
+                                                   siteCountY);
+
+          for (int i = pairX.first; i < pairX.second; i++) {
+            for (int j = pairY.first; j < pairY.second; j++) {
+              siteGrid[(j * siteCountX) + i] = Blocked;
+            }
+          }
         }
       }
     }
   }
 
-  // Mark blockage areas as empty so that their sites will be blocked.
+  // Mark blockage areas as Blocked so that their sites will be blocked.
   for (dbBlockage* blockage : db_->getChip()->getBlock()->getBlockages()) {
     dbInst* inst = blockage->getInstance();
     if (inst && !inst->isFixed()) {
@@ -1147,7 +1187,14 @@ void PlacerBase::initInstsForUnusableSites()
     for (int j = pairY.first; j < pairY.second; j++) {
       for (int i = pairX.first; i < pairX.second; i++) {
         if (cells == 0 || filled / (float) cells <= filler_density) {
-          siteGrid[j * siteCountX + i] = Empty;
+          siteGrid[(j * siteCountX) + i] = Blocked;
+          debugPrint(log_,
+                     GPL,
+                     "dummies",
+                     1,
+                     "Blocking site at ({}, {}) due to blockage.",
+                     i,
+                     j);
           ++filled;
         }
         ++cells;
@@ -1156,73 +1203,65 @@ void PlacerBase::initInstsForUnusableSites()
   }
 
   // fill fixed instances' bbox
-  for (auto& inst : pbCommon_->insts()) {
+  for (auto& inst : pbCommon_->getInsts()) {
     if (!inst->isFixed()) {
       continue;
     }
+    odb::dbInst* db_inst = inst->dbInst();
+    if (!db_inst) {
+      continue;
+    }
+
+    odb::dbGroup* db_inst_group = db_inst->getGroup();
+    if (group_ == nullptr) {
+      if (db_inst_group
+          && db_inst_group->getType() != odb::dbGroupType::VISUAL_DEBUG) {
+        continue;
+      }
+    } else {
+      if (!db_inst_group || db_inst_group != group_
+          || db_inst_group->getType() == odb::dbGroupType::VISUAL_DEBUG) {
+        continue;
+      }
+    }
+
     std::pair<int, int> pairX = getMinMaxIdx(
         inst->lx(), inst->ux(), die_.coreLx(), siteSizeX_, 0, siteCountX);
     std::pair<int, int> pairY = getMinMaxIdx(
         inst->ly(), inst->uy(), die_.coreLy(), siteSizeY_, 0, siteCountY);
-
     for (int i = pairX.first; i < pairX.second; i++) {
       for (int j = pairY.first; j < pairY.second; j++) {
-        siteGrid[j * siteCountX + i] = FixedInst;
-      }
-    }
-  }
-
-  // In the case of top level power domain i.e no group,
-  // mark all other power domains as empty
-  if (group_ == nullptr) {
-    for (dbPowerDomain* pd : pds) {
-      if (pd->getGroup() != nullptr) {
-        for (auto boundary : pd->getGroup()->getRegion()->getBoundaries()) {
-          Rect rect = boundary->getBox();
-
-          std::pair<int, int> pairX = getMinMaxIdx(rect.xMin(),
-                                                   rect.xMax(),
-                                                   die_.coreLx(),
-                                                   siteSizeX_,
-                                                   0,
-                                                   siteCountX);
-
-          std::pair<int, int> pairY = getMinMaxIdx(rect.yMin(),
-                                                   rect.yMax(),
-                                                   die_.coreLy(),
-                                                   siteSizeY_,
-                                                   0,
-                                                   siteCountY);
-
-          for (int i = pairX.first; i < pairX.second; i++) {
-            for (int j = pairY.first; j < pairY.second; j++) {
-              siteGrid[j * siteCountX + i] = Empty;
-            }
-          }
-        }
+        siteGrid[(j * siteCountX) + i] = FixedInst;
+        debugPrint(log_,
+                   GPL,
+                   "dummies",
+                   1,
+                   "Blocking site at ({}, {}) due to fixed instance {}.",
+                   i,
+                   j,
+                   db_inst->getName());
       }
     }
   }
 
   //
-  // Search the "Empty" coordinates on site-grid
+  // Search the "Blocked" coordinates on site-grid
   // --> These sites need to be dummyInstance
   //
   for (int j = 0; j < siteCountY; j++) {
     for (int i = 0; i < siteCountX; i++) {
-      // if empty spot found
-      if (siteGrid[j * siteCountX + i] == Empty) {
+      if (siteGrid[(j * siteCountX) + i] == Blocked) {
         int startX = i;
         // find end points
-        while (i < siteCountX && siteGrid[j * siteCountX + i] == Empty) {
+        while (i < siteCountX && siteGrid[(j * siteCountX) + i] == Blocked) {
           i++;
         }
         int endX = i;
-        Instance myInst(die_.coreLx() + siteSizeX_ * startX,
-                        die_.coreLy() + siteSizeY_ * j,
-                        die_.coreLx() + siteSizeX_ * endX,
-                        die_.coreLy() + siteSizeY_ * (j + 1));
-        instStor_.push_back(myInst);
+        Instance dummy_gcell(die_.coreLx() + (siteSizeX_ * startX),
+                             die_.coreLy() + (siteSizeY_ * j),
+                             die_.coreLx() + (siteSizeX_ * endX),
+                             die_.coreLy() + (siteSizeY_ * (j + 1)));
+        instStor_.push_back(dummy_gcell);
       }
     }
   }
@@ -1250,10 +1289,16 @@ void PlacerBase::printInfo() const
       GPL, 7, format_label_int, "Movable instances:", placeInsts_.size());
   log_->info(GPL, 8, format_label_int, "Fixed instances:", fixedInsts_.size());
   log_->info(GPL, 9, format_label_int, "Dummy instances:", dummyInsts_.size());
-  log_->info(
-      GPL, 10, format_label_int, "Number of nets:", pbCommon_->nets().size());
-  log_->info(
-      GPL, 11, format_label_int, "Number of pins:", pbCommon_->pins().size());
+  log_->info(GPL,
+             10,
+             format_label_int,
+             "Number of nets:",
+             pbCommon_->getNets().size());
+  log_->info(GPL,
+             11,
+             format_label_int,
+             "Number of pins:",
+             pbCommon_->getPins().size());
 
   log_->info(GPL,
              12,
@@ -1272,15 +1317,23 @@ void PlacerBase::printInfo() const
              block->dbuToMicrons(die_.coreUx()),
              block->dbuToMicrons(die_.coreUy()));
 
-  const int64_t coreArea = die_.coreArea();
   float util = static_cast<float>(placeInstsArea_)
-               / (coreArea - nonPlaceInstsArea_) * 100;
+               / (region_area_ - nonPlaceInstsArea_) * 100;
 
   log_->info(GPL,
              16,
              format_label_um2,
              "Core area:",
-             block->dbuAreaToMicrons(coreArea));
+             block->dbuAreaToMicrons(die_.coreArea()));
+  log_->info(GPL,
+             14,
+             "Region name: {}.",
+             (group_ != nullptr) ? group_->getName() : "top-level");
+  log_->info(GPL,
+             15,
+             format_label_um2,
+             "Region area:",
+             block->dbuAreaToMicrons(region_area_));
   log_->info(GPL,
              17,
              format_label_um2,

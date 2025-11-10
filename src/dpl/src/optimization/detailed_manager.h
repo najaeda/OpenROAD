@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+#include "dpl/Opendp.h"
 #include "infrastructure/Grid.h"
 #include "infrastructure/network.h"
 #include "util/journal.h"
@@ -114,7 +115,7 @@ class DetailedMgr
   void assignCellsToSegments(const std::vector<Node*>& nodesToConsider);
   int checkOverlapInSegments();
   int checkEdgeSpacingInSegments();
-  bool hasEdgeSpacingViolation(const Node* node) const;
+  bool hasPlacementViolation(const Node* node) const;
   int checkSiteAlignment();
   int checkRowAlignment();
   int checkRegionAssignment();
@@ -243,7 +244,7 @@ class DetailedMgr
   void setMoveLimit(unsigned int newMoveLimit) { moveLimit_ = newMoveLimit; }
 
   // Journal operations
-  const Journal& getJournal() const { return journal; }
+  const Journal& getJournal() const { return journal_; }
   void eraseFromGrid(Node* node);
   void paintInGrid(Node* node);
   struct compareNodesX
@@ -329,7 +330,7 @@ class DetailedMgr
   Network* network_;
   Grid* grid_;
   PlacementDRC* drc_engine_;
-  Journal journal;
+  Journal journal_;
 
   // For output.
   utl::Logger* logger_ = nullptr;

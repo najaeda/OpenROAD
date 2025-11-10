@@ -7,6 +7,7 @@
 
 #include "dbPagedVector.h"
 #include "odb/odb.h"
+#include "utl/Logger.h"
 
 namespace odb {
 
@@ -47,6 +48,8 @@ class dbJournalLog
   void pop(double& value);
   void pop(char*& value);
   void pop(std::string& value);
+
+  void append(dbJournalLog& other);
 
  private:
   enum LogDataType

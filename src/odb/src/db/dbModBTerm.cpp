@@ -15,6 +15,13 @@
 #include "dbTable.h"
 #include "dbTable.hpp"
 #include "odb/db.h"
+// User Code Begin Includes
+#include <cstdlib>
+#include <string>
+
+#include "odb/dbBlockCallBackObj.h"
+#include "utl/Logger.h"
+// User Code End Includes
 namespace odb {
 template class dbTable<_dbModBTerm>;
 
@@ -112,36 +119,16 @@ dbIStream& operator>>(dbIStream& stream, _dbModBTerm& obj)
 
 dbOStream& operator<<(dbOStream& stream, const _dbModBTerm& obj)
 {
-  if (obj.getDatabase()->isSchema(db_schema_update_hierarchy)) {
-    stream << obj._name;
-  }
-  if (obj.getDatabase()->isSchema(db_schema_update_hierarchy)) {
-    stream << obj._flags;
-  }
-  if (obj.getDatabase()->isSchema(db_schema_update_hierarchy)) {
-    stream << obj._parent_moditerm;
-  }
-  if (obj.getDatabase()->isSchema(db_schema_update_hierarchy)) {
-    stream << obj._parent;
-  }
-  if (obj.getDatabase()->isSchema(db_schema_update_hierarchy)) {
-    stream << obj._modnet;
-  }
-  if (obj.getDatabase()->isSchema(db_schema_update_hierarchy)) {
-    stream << obj._next_net_modbterm;
-  }
-  if (obj.getDatabase()->isSchema(db_schema_update_hierarchy)) {
-    stream << obj._prev_net_modbterm;
-  }
-  if (obj.getDatabase()->isSchema(db_schema_odb_busport)) {
-    stream << obj._busPort;
-  }
-  if (obj.getDatabase()->isSchema(db_schema_update_hierarchy)) {
-    stream << obj._next_entry;
-  }
-  if (obj.getDatabase()->isSchema(db_schema_hier_port_removal)) {
-    stream << obj._prev_entry;
-  }
+  stream << obj._name;
+  stream << obj._flags;
+  stream << obj._parent_moditerm;
+  stream << obj._parent;
+  stream << obj._modnet;
+  stream << obj._next_net_modbterm;
+  stream << obj._prev_net_modbterm;
+  stream << obj._busPort;
+  stream << obj._next_entry;
+  stream << obj._prev_entry;
   return stream;
 }
 
@@ -185,6 +172,23 @@ dbModule* dbModBTerm::getParent() const
 }
 
 // User Code Begin dbModBTermPublicMethods
+std::string dbModBTerm::getHierarchicalName() const
+{
+  dbModule* parent = getParent();
+  if (parent == nullptr) {
+    return getName();
+  }
+
+  dbBlock* block = parent->getOwner();
+  if (parent == block->getTopModule()) {
+    return getName();
+  }
+
+  return fmt::format("{}{}{}",  // NOLINT(misc-include-cleaner)
+                     parent->getModInst()->getHierarchicalName(),
+                     block->getHierarchyDelimiter(),
+                     getName());
+}
 
 void dbModBTerm::setModNet(dbModNet* modNet)
 {
@@ -284,8 +288,7 @@ dbModBTerm* dbModBTerm::create(dbModule* parentModule, const char* name)
   modbterm->_next_net_modbterm = 0;
   modbterm->_prev_net_modbterm = 0;
   modbterm->_busPort = 0;
-  modbterm->_name = strdup(name);
-  ZALLOCATED(modbterm->_name);
+  modbterm->_name = safe_strdup(name);
   modbterm->_parent = module->getOID();
   modbterm->_next_entry = module->_modbterms;
   modbterm->_prev_entry = 0;
@@ -297,12 +300,23 @@ dbModBTerm* dbModBTerm::create(dbModule* parentModule, const char* name)
   module->_modbterm_hash[name] = dbId<_dbModBTerm>(modbterm->getOID());
 
   if (block->_journal) {
+    debugPrint(block->getImpl()->getLogger(),
+               utl::ODB,
+               "DB_ECO",
+               1,
+               "ECO: create dbModBTerm {} at id {}",
+               name,
+               modbterm->getId());
     block->_journal->beginAction(dbJournal::CREATE_OBJECT);
     block->_journal->pushParam(dbModBTermObj);
     block->_journal->pushParam(name);
     block->_journal->pushParam(modbterm->getId());
     block->_journal->pushParam(module->getId());
     block->_journal->endAction();
+  }
+
+  for (auto callback : block->_callbacks) {
+    callback->inDbModBTermCreate((dbModBTerm*) modbterm);
   }
 
   return (dbModBTerm*) modbterm;
@@ -317,6 +331,9 @@ void dbModBTerm::connect(dbModNet* net)
   // already connected
   if (_modbterm->_modnet == net->getId()) {
     return;
+  }
+  for (auto callback : _block->_callbacks) {
+    callback->inDbModBTermPreConnect(this, net);
   }
   _modbterm->_modnet = net->getId();
   // append to net mod bterms. Do this by pushing onto head of list.
@@ -337,14 +354,21 @@ void dbModBTerm::connect(dbModNet* net)
                utl::ODB,
                "DB_ECO",
                1,
-               "ECO: connect modBterm {} to modnet {}",
+               "ECO: connect modBterm ({} {:p}) '{}' to modnet ({} {:p}) '{}'",
                getId(),
-               net->getId());
+               static_cast<void*>(this),
+               getHierarchicalName(),
+               net->getId(),
+               static_cast<void*>(net),
+               net->getHierarchicalName());
     _block->_journal->beginAction(dbJournal::CONNECT_OBJECT);
     _block->_journal->pushParam(dbModBTermObj);
     _block->_journal->pushParam(getId());
     _block->_journal->pushParam(net->getId());
     _block->_journal->endAction();
+  }
+  for (auto callback : _block->_callbacks) {
+    callback->inDbModBTermPostConnect(this);
   }
 }
 
@@ -356,9 +380,23 @@ void dbModBTerm::disconnect()
   if (_modbterm->_modnet == 0) {
     return;
   }
+
+  for (auto callback : block->_callbacks) {
+    callback->inDbModBTermPreDisconnect(this);
+  }
   _dbModNet* mod_net = block->_modnet_tbl->getPtr(_modbterm->_modnet);
 
   if (block->_journal) {
+    debugPrint(
+        block->getImpl()->getLogger(),
+        utl::ODB,
+        "DB_ECO",
+        1,
+        "ECO: disconnect dbModBTerm {} at id {} from dbModNet {} at id {}",
+        getName(),
+        getId(),
+        mod_net->_name,
+        mod_net->getId());
     block->_journal->beginAction(dbJournal::DISCONNECT_OBJECT);
     block->_journal->pushParam(dbModBTermObj);
     block->_journal->pushParam(_modbterm->getId());
@@ -388,6 +426,10 @@ void dbModBTerm::disconnect()
   _modbterm->_next_net_modbterm = 0;
   _modbterm->_prev_net_modbterm = 0;
   _modbterm->_modnet = 0;
+
+  for (auto callback : block->_callbacks) {
+    callback->inDbModBTermPostDisConnect(this, (dbModNet*) mod_net);
+  }
 }
 
 bool dbModBTerm::isBusPort() const
@@ -426,12 +468,23 @@ void dbModBTerm::destroy(dbModBTerm* val)
   _dbModule* module = block->_module_tbl->getPtr(_modbterm->_parent);
 
   if (block->_journal) {
+    debugPrint(block->getImpl()->getLogger(),
+               utl::ODB,
+               "DB_ECO",
+               1,
+               "ECO: delete dbModBTerm {} at id {}",
+               val->getName(),
+               val->getId());
     block->_journal->beginAction(dbJournal::DELETE_OBJECT);
     block->_journal->pushParam(dbModBTermObj);
     block->_journal->pushParam(val->getName());
     block->_journal->pushParam(val->getId());
     block->_journal->pushParam(module->getId());
     block->_journal->endAction();
+  }
+
+  for (auto callback : block->_callbacks) {
+    callback->inDbModBTermDestroy(val);
   }
 
   uint prev = _modbterm->_prev_entry;

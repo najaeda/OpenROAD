@@ -3,18 +3,27 @@
 
 #include "odb/dbStream.h"
 
+#include <algorithm>
 #include <iostream>
+#include <iterator>
 #include <sstream>
 #include <string>
 
 #include "dbDatabase.h"
 #include "odb/db.h"
+#include "odb/geom.h"
+#include "odb/isotropy.h"
+#include "utl/Logger.h"
 
 namespace odb {
 
 void dbOStream::pushScope(const std::string& name)
 {
-  _scopes.push_back({name, pos()});
+  int scope_pos = 0;
+  if (_db->getLogger()->debugCheck(utl::ODB, "io_size", 1)) {
+    scope_pos = pos();
+  }
+  _scopes.push_back({name, scope_pos});
 }
 
 void dbOStream::popScope()
@@ -95,6 +104,22 @@ dbIStream& operator>>(dbIStream& stream, Point& p)
   return stream;
 }
 
+dbOStream& operator<<(dbOStream& stream, const Point3D& p)
+{
+  stream << p.x_;
+  stream << p.y_;
+  stream << p.z_;
+  return stream;
+}
+
+dbIStream& operator>>(dbIStream& stream, Point3D& p)
+{
+  stream >> p.x_;
+  stream >> p.y_;
+  stream >> p.z_;
+  return stream;
+}
+
 dbOStream& operator<<(dbOStream& stream, const Oct& o)
 {
   stream << o.center_high_;
@@ -150,6 +175,12 @@ std::ostream& operator<<(std::ostream& os, const Rect& box)
 std::ostream& operator<<(std::ostream& os, const Point& pIn)
 {
   os << "( " << pIn.x() << " " << pIn.y() << " )";
+  return os;
+}
+
+std::ostream& operator<<(std::ostream& os, const Point3D& pIn)
+{
+  os << "( " << pIn.x() << " " << pIn.y() << " " << pIn.z() << " )";
   return os;
 }
 

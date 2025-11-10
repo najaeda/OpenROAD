@@ -4,6 +4,7 @@
 #include "rcx/MakeOpenRCX.h"
 
 #include "rcx/ext.h"
+#include "tcl.h"
 #include "utl/decode.h"
 
 extern "C" {
@@ -15,26 +16,10 @@ namespace rcx {
 // Tcl files encoded into strings.
 extern const char* rcx_tcl_inits[];
 
-rcx::Ext* makeOpenRCX()
-{
-  return new rcx::Ext();
-}
-
-void deleteOpenRCX(rcx::Ext* extractor)
-{
-  delete extractor;
-}
-
-void initOpenRCX(rcx::Ext* extractor,
-                 odb::dbDatabase* db,
-                 utl::Logger* logger,
-                 const char* spef_version,
-                 Tcl_Interp* tcl_interp)
+void initOpenRCX(Tcl_Interp* tcl_interp)
 {
   Rcx_Init(tcl_interp);
   utl::evalTclInit(tcl_interp, rcx::rcx_tcl_inits);
-
-  extractor->init(db, logger, spef_version);
 }
 
 }  // namespace rcx

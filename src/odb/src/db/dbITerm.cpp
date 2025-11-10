@@ -3,6 +3,9 @@
 
 #include "dbITerm.h"
 
+#include <algorithm>
+#include <cstdint>
+#include <cstring>
 #include <map>
 #include <utility>
 #include <vector>
@@ -13,6 +16,7 @@
 #include "dbBlock.h"
 #include "dbChip.h"
 #include "dbCommon.h"
+#include "dbCore.h"
 #include "dbDatabase.h"
 #include "dbHier.h"
 #include "dbInst.h"
@@ -28,7 +32,9 @@
 #include "dbTable.hpp"
 #include "odb/db.h"
 #include "odb/dbBlockCallBackObj.h"
+#include "odb/dbObject.h"
 #include "odb/dbShape.h"
+#include "odb/geom.h"
 #include "utl/Logger.h"
 namespace odb {
 
@@ -191,22 +197,26 @@ dbBlock* dbITerm::getBlock() const
 {
   return (dbBlock*) getImpl()->getOwner();
 }
+
 void dbITerm::setClocked(bool v)
 {
   _dbITerm* iterm = (_dbITerm*) this;
   iterm->_flags._clocked = v;
 }
+
 bool dbITerm::isClocked()
 {
   bool masterFlag = getMTerm()->getSigType() == dbSigType::CLOCK ? true : false;
   _dbITerm* iterm = (_dbITerm*) this;
   return iterm->_flags._clocked > 0 || masterFlag ? true : false;
 }
+
 void dbITerm::setMark(uint v)
 {
   _dbITerm* iterm = (_dbITerm*) this;
   iterm->_flags._mark = v;
 }
+
 bool dbITerm::isSetMark()
 {
   _dbITerm* iterm = (_dbITerm*) this;
@@ -273,6 +283,12 @@ void dbITerm::clearConnected()
   iterm->_flags._connected = 0;
 }
 
+/*
+Warning: this does not do a reassociate. Specifically it will
+not make sure that every dbModNet has just one dbNet associated
+with it. To assure that, use dbNetwork::connectPin
+*/
+
 void dbITerm::connect(dbNet* db_net, dbModNet* db_mod_net)
 {
   connect(db_net);
@@ -333,13 +349,17 @@ void dbITerm::connect(dbNet* net_)
   }
 
   if (block->_journal) {
-    debugPrint(iterm->getImpl()->getLogger(),
+    debugPrint(getImpl()->getLogger(),
                utl::ODB,
                "DB_ECO",
                1,
-               "ECO: connect Iterm {} to net {}",
+               "ECO: connect dbITerm({}, {:p}) '{}' to dbNet({}, {:p}) '{}'",
                getId(),
-               net_->getId());
+               static_cast<void*>(this),
+               getName(),
+               net->getId(),
+               static_cast<void*>(net),
+               net_->getName());
     block->_journal->beginAction(dbJournal::CONNECT_OBJECT);
     block->_journal->pushParam(dbITermObj);
     block->_journal->pushParam(getId());
@@ -394,7 +414,7 @@ void dbITerm::connect(dbModNet* mod_net)
   // accidentally blow away prior flat net connections)
 
   if (iterm->_mnet != 0) {
-    disconnectModNet();
+    disconnectDbModNet();
   }
 
   iterm->_mnet = _mod_net->getId();
@@ -412,9 +432,13 @@ void dbITerm::connect(dbModNet* mod_net)
                utl::ODB,
                "DB_ECO",
                1,
-               "ECO: connect Iterm {} to modnet {}",
+               "ECO: connect dbITerm({} {:p}) '{}' to dbModNet({} {:p}) '{}'",
                getId(),
-               _mod_net->getId());
+               static_cast<void*>(this),
+               getName(),
+               _mod_net->getId(),
+               static_cast<void*>(_mod_net),
+               ((dbModNet*) _mod_net)->getHierarchicalName());
     block->_journal->beginAction(dbJournal::CONNECT_OBJECT);
     block->_journal->pushParam(dbITermObj);
     block->_journal->pushParam(getId());
@@ -457,8 +481,9 @@ void dbITerm::disconnect()
   _dbBlock* block = (_dbBlock*) iterm->getOwner();
   _dbNet* net
       = iterm->_net == 0 ? nullptr : block->_net_tbl->getPtr(iterm->_net);
-  _dbModNet* mod_net
+  _dbModNet* mod_net_impl
       = iterm->_mnet == 0 ? nullptr : block->_modnet_tbl->getPtr(iterm->_mnet);
+  dbModNet* mod_net = (dbModNet*) mod_net_impl;
 
   if (net && net->_flags._dont_touch) {
     inst->getLogger()->error(
@@ -470,18 +495,26 @@ void dbITerm::disconnect()
   }
 
   if (block->_journal) {
-    debugPrint(iterm->getImpl()->getLogger(),
+    debugPrint(getImpl()->getLogger(),
                utl::ODB,
                "DB_ECO",
                1,
-               "ECO: disconnect Iterm {}",
-               getId());
-
+               "disconnect dbITerm({}, {:p}) '{}' from dbNet({}, {:p}) '{}' "
+               "corresponding to dbModNet({}, {:p}) '{}'",
+               getId(),
+               static_cast<void*>(this),
+               getName(),
+               (net) ? net->getId() : 0,
+               static_cast<void*>(net),
+               (net) ? net->_name : "NULL",
+               (mod_net_impl) ? mod_net_impl->getId() : 0,
+               static_cast<void*>(mod_net),
+               (mod_net) ? mod_net->getHierarchicalName() : "NULL");
     block->_journal->beginAction(dbJournal::DISCONNECT_OBJECT);
     block->_journal->pushParam(dbITermObj);
     block->_journal->pushParam(getId());
     block->_journal->pushParam(net ? net->getOID() : 0U);
-    block->_journal->pushParam(mod_net ? mod_net->getOID() : 0U);
+    block->_journal->pushParam(mod_net_impl ? mod_net_impl->getOID() : 0U);
     block->_journal->endAction();
   }
 
@@ -514,11 +547,11 @@ void dbITerm::disconnect()
     }
   }
 
-  if (mod_net) {
-    if (mod_net->_iterms == id) {
-      mod_net->_iterms = iterm->_next_modnet_iterm;
-      if (mod_net->_iterms != 0) {
-        _dbITerm* t = block->_iterm_tbl->getPtr(mod_net->_iterms);
+  if (mod_net_impl) {
+    if (mod_net_impl->_iterms == id) {
+      mod_net_impl->_iterms = iterm->_next_modnet_iterm;
+      if (mod_net_impl->_iterms != 0) {
+        _dbITerm* t = block->_iterm_tbl->getPtr(mod_net_impl->_iterms);
         t->_prev_modnet_iterm = 0;
       }
     } else {
@@ -574,9 +607,13 @@ void dbITerm::disconnectDbNet()
                utl::ODB,
                "DB_ECO",
                1,
-               "ECO: disconnect Iterm {} to net {}",
+               "ECO: disconnect dbITerm({} {:p}) '{}' from dbNet({} {:p}) '{}'",
                getId(),
-               net->getId());
+               static_cast<void*>(this),
+               getName(),
+               net->getId(),
+               static_cast<void*>(net),
+               ((dbNet*) net)->getName());
     block->_journal->beginAction(dbJournal::DISCONNECT_OBJECT);
     block->_journal->pushParam(dbITermObj);
     block->_journal->pushParam(getId());
@@ -614,7 +651,7 @@ void dbITerm::disconnectDbNet()
 //
 // Disconnect the mod net and allow journaling
 //
-void dbITerm::disconnectModNet()
+void dbITerm::disconnectDbModNet()
 {
   _dbITerm* iterm = (_dbITerm*) this;
   _dbBlock* block = (_dbBlock*) iterm->getOwner();
@@ -627,9 +664,11 @@ void dbITerm::disconnectModNet()
                  utl::ODB,
                  "DB_ECO",
                  1,
-                 "ECO: disconnect Iterm {} to modnet {}",
+                 "ECO: disconnect dbIterm({}) '{}' from dbModNet({}) '{}'",
                  getId(),
-                 iterm->_mnet);
+                 getName(),
+                 iterm->_mnet,
+                 mod_net->_name);
       block->_journal->beginAction(dbJournal::DISCONNECT_OBJECT);
       block->_journal->pushParam(dbITermObj);
       block->_journal->pushParam(getId());
@@ -781,6 +820,11 @@ void dbITerm::setAccessPoint(dbMPin* pin, dbAccessPoint* ap)
   } else {
     iterm->aps_[pin->getImpl()->getOID()] = dbId<_dbAccessPoint>();
   }
+
+  _dbBlock* block = (_dbBlock*) iterm->getOwner();
+  for (auto callback : block->_callbacks) {
+    callback->inDbITermPostSetAccessPoints(this);
+  }
 }
 
 std::map<dbMPin*, std::vector<dbAccessPoint*>> dbITerm::getAccessPoints() const
@@ -804,12 +848,28 @@ std::vector<dbAccessPoint*> dbITerm::getPrefAccessPoints() const
 {
   _dbBlock* block = (_dbBlock*) getBlock();
   _dbITerm* iterm = (_dbITerm*) this;
-  std::vector<dbAccessPoint*> aps;
+  std::vector<std::pair<dbId<_dbMPin>, dbId<_dbAccessPoint>>> sorted_aps;
+
   for (auto& [pin_id, ap_id] : iterm->aps_) {
     if (ap_id.isValid()) {
-      aps.push_back((dbAccessPoint*) block->ap_tbl_->getPtr(ap_id));
+      sorted_aps.emplace_back(pin_id, ap_id);
     }
   }
+  // sort to maintain iterator stability, and backwards compatibility with
+  // std::map which used to be used to store aps.
+  std::sort(sorted_aps.begin(),
+            sorted_aps.end(),
+            [](const std::pair<dbId<_dbMPin>, dbId<_dbAccessPoint>>& a,
+               const std::pair<dbId<_dbMPin>, dbId<_dbAccessPoint>>& b) {
+              return a.first < b.first;
+            });
+
+  std::vector<dbAccessPoint*> aps;
+  aps.reserve(sorted_aps.size());
+  for (auto& [pin_id, ap_id] : sorted_aps) {
+    aps.push_back((dbAccessPoint*) block->ap_tbl_->getPtr(ap_id));
+  }
+
   return aps;
 }
 

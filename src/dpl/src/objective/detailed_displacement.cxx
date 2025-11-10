@@ -3,9 +3,12 @@
 
 #include "detailed_displacement.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 
+#include "dpl/Opendp.h"
+#include "infrastructure/Coordinates.h"
 #include "optimization/detailed_manager.h"
 #include "optimization/detailed_orient.h"
 
@@ -100,10 +103,7 @@ double DetailedDisplacement::delta(const Journal& journal)
   std::fill(del_.begin(), del_.end(), 0);
 
   // Put cells into their "old positions and orientations".
-  const auto& changes = journal.getActions();
-  for (int i = changes.size() - 1; i >= 0; i--) {
-    journal.undo(changes[i], true);
-  }
+  journal.undo(true);
 
   for (const auto ndi : journal.getAffectedNodes()) {
     const int spanned = (ndi->getHeight() / singleRowHeight_).v;
@@ -115,9 +115,7 @@ double DetailedDisplacement::delta(const Journal& journal)
   }
 
   // Put cells into their "new positions and orientations".
-  for (const auto& change : changes) {
-    journal.redo(change, true);
-  }
+  journal.redo(true);
 
   for (const auto ndi : journal.getAffectedNodes()) {
     const DbuX dx = abs(ndi->getLeft() - ndi->getOrigLeft());

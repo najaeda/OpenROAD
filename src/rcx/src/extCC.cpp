@@ -4,8 +4,12 @@
 #include <algorithm>
 #include <vector>
 
-#include "grids.h"
 #include "gseq.h"
+#include "odb/array1.h"
+#include "odb/util.h"
+#include "rcx/grids.h"
+
+using odb::Ath__array1D;
 
 namespace rcx {
 
@@ -94,7 +98,7 @@ uint Track::findOverlap(Wire* origWire,
 {
   rcx::CoupleOptions coupleOptions{};
 
-  AthPool<Wire>* wirePool = _grid->getWirePoolPtr();
+  odb::AthPool<Wire>* wirePool = _grid->getWirePoolPtr();
 
   uint NoPowerTarget = _grid->getGridTable()->noPowerTarget();
   bool srcMarked = origWire->getNet()->isMarked();
@@ -336,7 +340,7 @@ uint Track::couplingCaps(Grid* ccGrid,
   int noPowerSource = _grid->getGridTable()->noPowerSource();
   uint TargetHighMarkedNet = _grid->getGridTable()->targetHighMarkedNet();
   bool allNet = _grid->getGridTable()->allNet();
-  AthPool<Wire>* wirePool = _grid->getWirePoolPtr();
+  odb::AthPool<Wire>* wirePool = _grid->getWirePoolPtr();
   uint wireCnt = 0;
   Wire* origWire = nullptr;
   uint delt;
@@ -567,7 +571,7 @@ void Track::buildDgContext(Ath__array1D<SEQ*>* dgContext,
   uint xidx = 0;
   uint yidx = 1;
   uint lidx, bidx;
-  AthPool<SEQ>* seqPool = _grid->getGridTable()->seqPool();
+  odb::AthPool<SEQ>* seqPool = _grid->getGridTable()->seqPool();
   SEQ* seq;
   int rsegid;
   for (jj = 0; jj < ctxsize; jj++) {
@@ -897,9 +901,7 @@ int GridTable::couplingCaps(int hiXY,
       _bandWire = new Ath__array1D<Wire*>(4096);
     }
   } else {
-    if (_bandWire) {
-      delete (_bandWire);
-    }
+    delete (_bandWire);
     _bandWire = nullptr;
   }
   int minExtracted = hiXY;

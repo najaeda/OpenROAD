@@ -3,8 +3,6 @@
 
 #include "ord/Tech.h"
 
-#include <tcl.h>
-
 #include <string>
 
 #include "db_sta/dbNetwork.hh"
@@ -13,7 +11,9 @@
 #include "ord/OpenRoad.hh"
 #include "sta/Corner.hh"
 #include "sta/Liberty.hh"
+#include "sta/MinMax.hh"
 #include "sta/Units.hh"
+#include "tcl.h"
 
 namespace ord {
 

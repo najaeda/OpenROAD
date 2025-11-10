@@ -9,12 +9,17 @@
 #include "dbCCSeg.h"
 #include "dbCCSegItr.h"
 #include "dbCommon.h"
+#include "dbCore.h"
 #include "dbDatabase.h"
 #include "dbJournal.h"
 #include "dbNet.h"
 #include "dbTable.h"
 #include "dbTable.hpp"
+#include "odb/ZException.h"
 #include "odb/db.h"
+#include "odb/dbObject.h"
+#include "odb/dbSet.h"
+#include "odb/dbTypes.h"
 #include "utl/Logger.h"
 
 namespace odb {
@@ -781,13 +786,15 @@ uint dbCapNode::getShapeId()
   }
   if (seg->_flags._iterm > 0) {
     dbITerm* iterm = dbITerm::getITerm(block, seg->_node_num);
-    if (!iterm->getNet() || !iterm->getNet()->getWire())
+    if (!iterm->getNet() || !iterm->getNet()->getWire()) {
       return 0;
+    }
     return iterm->getNet()->getWire()->getTermJid(iterm->getId());
   }
   dbBTerm* bterm = dbBTerm::getBTerm(block, seg->_node_num);
-  if (!bterm->getNet() || !bterm->getNet()->getWire())
+  if (!bterm->getNet() || !bterm->getNet()->getWire()) {
     return 0;
+  }
   return bterm->getNet()->getWire()->getTermJid(-bterm->getId());
 }
 

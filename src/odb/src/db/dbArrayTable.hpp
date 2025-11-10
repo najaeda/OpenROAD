@@ -3,12 +3,18 @@
 
 #pragma once
 
+#include <cassert>
+#include <cstdlib>
 #include <cstring>
 #include <new>
 #include <vector>
 
 #include "dbArrayTable.h"
+#include "dbCommon.h"
+#include "dbCore.h"
 #include "odb/ZException.h"
+#include "odb/dbId.h"
+#include "odb/dbObject.h"
 #include "odb/dbStream.h"
 
 namespace odb {
@@ -164,8 +170,7 @@ template <class T>
 void dbArrayTable<T>::newPage()
 {
   uint size = page_size() * sizeof(T) + sizeof(dbObjectPage);
-  dbArrayTablePage* page = (dbArrayTablePage*) malloc(size);
-  ZALLOCATED(page);
+  dbArrayTablePage* page = (dbArrayTablePage*) safe_malloc(size);
   memset(page, 0, size);
 
   uint page_id = _page_cnt;
@@ -354,8 +359,7 @@ template <class T>
 void dbArrayTable<T>::copy_page(uint page_id, dbArrayTablePage* page)
 {
   uint size = page_size() * sizeof(T) + sizeof(dbObjectPage);
-  dbArrayTablePage* p = (dbArrayTablePage*) malloc(size);
-  ZALLOCATED(p);
+  dbArrayTablePage* p = (dbArrayTablePage*) safe_malloc(size);
   memset(p, 0, size);
   p->_table = this;
   p->_page_addr = page_id << _page_shift;
@@ -417,8 +421,7 @@ dbIStream& operator>>(dbIStream& stream, dbArrayTable<T>& table)
   uint i;
   for (i = 0; i < table._page_cnt; ++i) {
     uint size = table.page_size() * sizeof(T) + sizeof(dbObjectPage);
-    dbArrayTablePage* page = (dbArrayTablePage*) malloc(size);
-    ZALLOCATED(page);
+    dbArrayTablePage* page = (dbArrayTablePage*) safe_malloc(size);
     memset(page, 0, size);
     page->_page_addr = i << table._page_shift;
     page->_table = &table;

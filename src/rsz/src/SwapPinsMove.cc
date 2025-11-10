@@ -14,6 +14,18 @@
 #include <utility>
 
 #include "BaseMove.hh"
+#include "odb/db.h"
+#include "sta/ArcDelayCalc.hh"
+#include "sta/Delay.hh"
+#include "sta/Graph.hh"
+#include "sta/Liberty.hh"
+#include "sta/MinMax.hh"
+#include "sta/NetworkClass.hh"
+#include "sta/Path.hh"
+#include "sta/PathExpanded.hh"
+#include "sta/TimingArc.hh"
+#include "sta/Transition.hh"
+#include "utl/Logger.h"
 
 namespace rsz {
 
@@ -106,7 +118,7 @@ bool SwapPinsMove::doMove(const Path* drvr_path,
                    RSZ,
                    "repair_setup",
                    3,
-                   "Swap {} ({}) {} {}",
+                   "swap pins {} ({}) {} {}",
                    network_->name(drvr),
                    cell->name(),
                    input_port->name(),
@@ -114,9 +126,9 @@ bool SwapPinsMove::doMove(const Path* drvr_path,
 
         debugPrint(logger_,
                    RSZ,
-                   "moves",
+                   "opt_moves",
                    1,
-                   "swap_pins {} ({}) {}<->{}",
+                   "ACCEPT swap_pins {} ({}) {}<->{}",
                    network_->name(drvr),
                    cell->name(),
                    input_port->name(),
@@ -143,7 +155,7 @@ void SwapPinsMove::swapPins(Instance* inst,
   odb::dbModNet* mod_net_pin2 = nullptr;
   odb::dbNet* flat_net_pin2 = nullptr;
 
-  InstancePinIterator* pin_iter = network_->pinIterator(inst);
+  std::unique_ptr<InstancePinIterator> pin_iter(network_->pinIterator(inst));
   found_pin1 = found_pin2 = nullptr;
   net1 = net2 = nullptr;
   while (pin_iter->hasNext()) {
@@ -183,16 +195,6 @@ void SwapPinsMove::swapPins(Instance* inst,
     sta_->disconnectPin(found_pin2);
     db_network_->connectPin(
         found_pin2, (Net*) flat_net_pin1, (Net*) mod_net_pin1);
-
-    // Invalidate the parasitics on these two nets.
-    if (resizer_->haveEstimatedParasitics()) {
-      resizer_->invalidateParasitics(
-          found_pin2,
-          db_network_->dbToSta(flat_net_pin1));  // net1);
-      resizer_->invalidateParasitics(
-          found_pin1,
-          db_network_->dbToSta(flat_net_pin2));  // net2);
-    }
   }
 }
 
@@ -215,10 +217,16 @@ void SwapPinsMove::equivCellPins(const LibertyCell* cell,
   // count number of output ports.
   while (port_iter.hasNext()) {
     LibertyPort* port = port_iter.next();
-    if (port->direction()->isOutput()) {
+    sta::PortDirection* direction = port->direction();
+    if (direction->isOutput()) {
       ++outputs;
-    } else {
+    } else if (direction->isInput()) {
       ++inputs;
+    } else if (direction->isPower() || direction->isGround()) {
+      // skip
+    } else {
+      ports.clear();
+      return;  // reject tristate/internal/bidirect/unknown cases
     }
   }
 
