@@ -8433,8 +8433,8 @@ class dbModule : public dbObject
                    dbModule* new_module,
                    dbModInst* new_mod_inst);
 
-  dbSet<dbModInst> getChildren();
-  dbSet<dbModInst> getModInsts();
+  dbSet<dbModInst> getChildren() const;
+  dbSet<dbModInst> getModInsts() const;
   dbSet<dbModNet> getModNets();
   // Get the ports of a module (STA world uses ports, which contain members).
   dbSet<dbModBTerm> getPorts();

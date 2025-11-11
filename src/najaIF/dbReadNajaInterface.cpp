@@ -181,7 +181,7 @@ void NajaIF::makeBlock(const std::string& topName)
 {
   dbChip* chip = db_->getChip();
   if (chip == nullptr) {
-    chip = dbChip::create(db_);
+    chip = dbChip::create(db_, db_->getTech());
   }
   block_ = chip->getBlock();
   if (block_) {
@@ -204,7 +204,7 @@ void NajaIF::makeBlock(const std::string& topName)
     }
   } else {
     block_ = dbBlock::create(
-        chip, topName.c_str(), db_->getTech(), '/');
+        chip, topName.c_str(), '/');
   }
   dbTech* tech = db_->getTech();
   block_->setDefUnits(tech->getLefUnits());

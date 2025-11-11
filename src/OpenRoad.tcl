@@ -10,10 +10,10 @@ proc read_naja_if_interface { args } {
   sta::check_argc_eq1 "read_naja_if_interface" $args
   set filename [file nativename [lindex $args 0]]
   if { ![file exists $filename] } {
-    utl::error "ORD" 20 "$filename does not exist."
+    utl::error "ORD" 24 "$filename does not exist."
   }
   if { ![file readable $filename] } {
-    utl::error "ORD" 21 "$filename is not readable."
+    utl::error "ORD" 25 "$filename is not readable."
   }
   ord::read_naja_if_interface_cmd $filename
 }
