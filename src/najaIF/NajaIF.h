@@ -31,16 +31,16 @@ class NajaIF {
     // boost::asio::ip::tcp::socket getSocket(uint16_t port=0); 
      static constexpr std::string_view InterfaceName = "db_interface.snl";
      static constexpr std::string_view ImplementationName = "db_implementation.snl";
-     //void dump(const NLDB* db, const std::filesystem::path& dumpPath);
+     void dump(odb::dbBlock* block, const std::filesystem::path& dumpPath);
     // void send(const NLDB* db, const std::string& ipAddress, uint16_t port);
     // void send(const NLDB* db, const std::string& ipAddress, uint16_t port, uint8_t forceDBID);
     //odb::dbDatabase* load(const std::filesystem::path& dumpPath);
     // NLDB* receive(boost::asio::ip::tcp::socket& socket);
     // NLDB* receive(uint16_t port);
 
-    //  void dumpInterface(const NLDB* db, int fileDescriptor);
-    //  void dumpInterface(const NLDB* db, int fileDescriptor, uint8_t forceDBID);
-    //  void dumpInterface(const NLDB* db, const std::filesystem::path& interfacePath);
+      void dumpInterface(odb::dbBlock* block, int fileDescriptor);
+      void dumpInterface(odb::dbBlock* block, int fileDescriptor, uint8_t forceDBID);
+      void dumpInterface(odb::dbBlock* block, const std::filesystem::path& interfacePath);
     // void sendInterface(const NLDB* db, const std::string& ipAddress, uint16_t port);
     // void sendInterface(const NLDB* db, boost::asio::ip::tcp::socket& socket); 
     // void sendInterface(const NLDB* db, boost::asio::ip::tcp::socket& socket, uint8_t forceDBID); 
@@ -52,7 +52,7 @@ class NajaIF {
 
     //  void dumpImplementation(const NLDB* db, int fileDescriptor);
     //  void dumpImplementation(const NLDB* db, int fileDescriptor, uint8_t forceDBID);
-    //  void dumpImplementation(const NLDB* db, const std::filesystem::path& implementationPath);
+    // void dumpImplementation(const NLDB* db, const std::filesystem::path& implementationPath);
     // void sendImplementation(const NLDB* db, const std::string& ipAddress, uint16_t port);
     // void sendImplementation(const NLDB* db, boost::asio::ip::tcp::socket& socket);
     // void sendImplementation(const NLDB* db, boost::asio::ip::tcp::socket& socket, uint8_t forceDBID);

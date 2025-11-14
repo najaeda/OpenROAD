@@ -33,7 +33,8 @@ add_library(naja_if_parser STATIC
     ${najaCommonSources} ${najaNLInterfaceSources}
     ${najaNLImplementationSources}
     dbReadNajaImpl.cpp
-    dbReadNajaInterface.cpp)
+    dbReadNajaInterface.cpp
+    dbDumpNajaInterface.cpp)
 
 set_target_properties(naja_if_parser PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
