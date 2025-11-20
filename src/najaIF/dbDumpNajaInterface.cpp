@@ -108,6 +108,10 @@ void dumpBusTerm(
   busTermBuilder.setMsb(busTerm->getFrom());
   busTermBuilder.setLsb(busTerm->getTo());
   busTermBuilder.setDirection(SNLtoCapnPDirection(busTerm->getPort()->getIoType()));
+  for (size_t i = busTerm->getFrom(); i <= busTerm->getTo(); i++) {
+    dbModBTerm* bitTerm = busTerm->getBusIndexedElement(i);
+    NajaIF::term2busbit_[bitTerm->getId()] = std::pair<dbBusPort*, size_t>(busTerm, i);
+  }
 }
 
 // void dumpParameter(

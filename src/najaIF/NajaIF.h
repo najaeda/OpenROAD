@@ -17,6 +17,7 @@ namespace odb {
 class dbDatabase;
 class dbBlock;
 class dbModule;
+class dbBusPort;
 
 class NajaIF {
   public:
@@ -50,9 +51,9 @@ class NajaIF {
     // NLDB* receiveInterface(uint16_t port);
     // NLDB* receiveInterface(boost::asio::ip::tcp::socket& socket); 
 
-    //  void dumpImplementation(const NLDB* db, int fileDescriptor);
-    //  void dumpImplementation(const NLDB* db, int fileDescriptor, uint8_t forceDBID);
-    // void dumpImplementation(const NLDB* db, const std::filesystem::path& implementationPath);
+    void dumpImplementation(odb::dbBlock* block, int fileDescriptor);
+    void dumpImplementation(odb::dbBlock* block, int fileDescriptor, uint8_t forceDBID);
+    void dumpImplementation(odb::dbBlock* block, const std::filesystem::path& implementationPath);
     // void sendImplementation(const NLDB* db, const std::string& ipAddress, uint16_t port);
     // void sendImplementation(const NLDB* db, boost::asio::ip::tcp::socket& socket);
     // void sendImplementation(const NLDB* db, boost::asio::ip::tcp::socket& socket, uint8_t forceDBID);
@@ -65,8 +66,11 @@ class NajaIF {
     void makeBlock(const std::string& topName);
 
 //private:
+     // Reading helpers
      static std::map<std::tuple<size_t,size_t,size_t>, std::pair<odb::dbModule*, bool>> module_map_;
      static std::map<size_t, std::vector<std::pair<std::string, bool>>> module2terms_; // assuming ID for DBMod is unique
+     // Dumping helpers
+     static std::map<uint /*dbModBTerm id*/, std::pair<dbBusPort*, size_t /*bit index*/>> term2busbit_;
      static odb::dbDatabase* db_;
      static odb::dbBlock* block_;
      static odb::dbBlock* top_block_;

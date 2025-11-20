@@ -33,6 +33,7 @@ add_library(naja_if_parser STATIC
     ${najaCommonSources} ${najaNLInterfaceSources}
     ${najaNLImplementationSources}
     dbReadNajaImpl.cpp
+    dbDumpNajaImpl.cpp
     dbReadNajaInterface.cpp
     dbDumpNajaInterface.cpp)
 
