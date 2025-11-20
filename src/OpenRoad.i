@@ -405,6 +405,18 @@ read_naja_if_implementation_cmd(const char *filename)
   ord->readNajaIFImplementation(filename);
 }
 
+void write_naja_interface_cmd(const char *filename)
+{
+  OpenRoad *ord = getOpenRoad();
+  ord->writeNajaIFInterface(filename);
+}
+
+void write_naja_implementation_cmd(const char *filename)
+{
+  OpenRoad *ord = getOpenRoad();
+  ord->writeNajaIFImplementation(filename);
+}
+
 void
 link_design_db_cmd(const char *design_name,
                    bool hierarchy,

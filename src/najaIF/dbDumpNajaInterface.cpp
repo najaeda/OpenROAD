@@ -27,6 +27,9 @@
 
 using namespace odb;
 
+// Init term2busbit_
+std::map<uint /*dbModBTerm id*/, std::pair<dbBusPort*, size_t /*bit index*/>> NajaIF::term2busbit_;
+
 // void dumpProperty(
 //   Property::Builder& property,
 //   NajaDumpableProperty* najaProperty) {

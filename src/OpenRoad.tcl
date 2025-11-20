@@ -33,6 +33,24 @@ proc read_naja_if_implementation { args } {
   ord::read_naja_if_implementation_cmd $filename
 }
 
+sta::define_cmd_args "dump_naja_if_interface" { filename }
+
+proc dump_naja_if_interface { args } {
+  sta::parse_key_args "dump_naja_if_interface" args keys {} flags {}
+  sta::check_argc_eq1 "dump_naja_if_interface" $args
+  set filename [file nativename [lindex $args 0]]
+  ord::dump_naja_if_interface_cmd $filename
+}
+
+sta::define_cmd_args "dump_naja_if_implementation" { filename }
+
+proc dump_naja_if_implementation { args } {
+  sta::parse_key_args "dump_naja_if_implementation" args keys {} flags {}
+  sta::check_argc_eq1 "dump_naja_if_implementation" $args
+  set filename [file nativename [lindex $args 0]]
+  ord::dump_naja_if_implementation_cmd $filename
+}
+
 sta::define_cmd_args "read_lef" {[-tech] [-library] [-tech_name name] filename}
 
 proc read_lef { args } {

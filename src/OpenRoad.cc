@@ -577,6 +577,20 @@ void OpenRoad::readNajaIFImplementation(const char* filename)
   naja_if.loadImplementation(path);
 }
 
+void OpenRoad::writeNajaIFInterface(const char* filename)
+{
+  std::filesystem::path path(filename);
+  odb::NajaIF naja_if(db_); 
+  naja_if.dumpInterface(db_->getChip()->getBlock(), path);
+}
+
+void OpenRoad::writeNajaIFImplementation(const char* filename)
+{
+  std::filesystem::path path(filename);
+  odb::NajaIF naja_if(db_); 
+  naja_if.dumpImplementation(db_->getChip()->getBlock(), path);
+}
+
 void OpenRoad::linkDesign(const char* design_name,
                           bool hierarchy,
                           bool omit_filename_prop)
